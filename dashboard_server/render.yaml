@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: satwebconnect
+    env: node
+    buildCommand: cd dashboard_server && npm install
+    startCommand: cd dashboard_server && node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: API_KEY
+        generateValue: true
+    disk:
+      name: data
+      mountPath: /opt/render/project/src/dashboard_server
+      sizeGB: 1
