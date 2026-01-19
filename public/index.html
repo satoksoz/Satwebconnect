@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SatWebConnect - ESP32-S3 Dashboard</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --primary: #4361ee;
+            --primary-dark: #3a56d4;
+            --secondary: #7209b7;
+            --success: #4cc9f0;
+            --danger: #f72585;
+            --warning: #f8961e;
+            --dark: #1a1a2e;
+            --light: #f8f9fa;
+            --gray: #6c757d;
+            --card-bg: rgba(255, 255, 255, 0.1);
+            --card-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            color: white;
+            min-height: 100vh;
+            padding-bottom: 50px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+
+        /* Header Styles */
+        header {
+            padding: 30px 0;
+            text-align: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            margin-bottom: 40px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        .logo i {
+            font-size: 2.5em;
+            color: var(--success);
+        }
+
+        .logo h1 {
+            font-size: 2.5em;
+            font-weight: 700;
+        }
+
+        .tagline {
+            font-size: 1.1em;
+            opacity: 0.9;
+            max-width: 600px;
+            margin: 0 auto;
+            line-height: 1.6;
+        }
+
+        /* Stats Section */
+        .stats-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 40px;
+        }
+
+        .stat-card {
+            background: var(--card-bg);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 25px;
+            text-align: center;
+            box-shadow: var(--card-shadow);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
+        }
+
+        .stat-icon {
+            font-size: 2em;
+            margin-bottom: 15px;
+            opacity: 0.9;
+        }
+
+        .stat-value {
+            font-size: 2.5em;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            font-size: 0.9em;
+            opacity: 0.8;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        /* Search Section */
+        .search-section {
+            background: var(--card-bg);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            margin-bottom: 40px;
+            box-shadow: var(--card-shadow);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .search-section h2 {
+            text-align: center;
+            margin-bottom: 25px;
+            font-size: 1.8em;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .search-box {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .device-input {
+            flex: 1;
+            padding: 18px 25px;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            background: rgba(255, 255, 255, 0.9);
+            color: var(--dark);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s ease;
+        }
+
+        .device-input:focus {
+            outline: none;
+            background: white;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+        }
+
+        .device-input::placeholder {
+            color: var(--gray);
+        }
+
+        .btn {
+            padding: 18px 35px;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            transition: all 0.3s ease;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-dark);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(67, 97, 238, 0.4);
+        }
+
+        .search-hint {
+            text-align: center;
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 0.9em;
+            margin-top: 10px;
+        }
+
+        /* Devices Section */
+        .devices-section {
+            background: var(--card-bg);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: var(--card-shadow);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .section-header h2 {
+            font-size: 1.8em;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .btn-refresh {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            padding: 12px 25px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .btn-refresh:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .devices-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 25px;
+        }
+
+        .device-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 25px;
+            border-left: 5px solid var(--primary);
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .device-card:hover {
+            transform: translateY(-5px);
+            background: rgba(255, 255, 255, 0.08);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+
+        .device-card.online {
+            border-left-color: var(--success);
+        }
+
+        .device-card.offline {
+            border-left-color: var(--danger);
+        }
+
+        .device-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 20px;
+        }
+
+        .device-name {
+            font-size: 1.4em;
+            font-weight: 600;
+            word-break: break-all;
+        }
+
+        .device-status {
+            padding: 6px 15px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .status-online {
+            background: rgba(76, 201, 240, 0.2);
+            color: var(--success);
+        }
+
+        .status-offline {
+            background: rgba(247, 37, 133, 0.2);
+            color: var(--danger);
+        }
+
+        .device-info {
+            margin-bottom: 25px;
+        }
+
+        .info-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 12px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .info-label {
+            font-size: 0.9em;
+            opacity: 0.7;
+        }
+
+        .info-value {
+            font-weight: 600;
+            font-family: 'Courier New', monospace;
+            font-size: 0.95em;
+            max-width: 60%;
+            text-align: right;
+            word-break: break-all;
+        }
+
+        .device-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn-action {
+            flex: 1;
+            padding: 12px;
+            font-size: 0.9em;
+            text-align: center;
+            text-decoration: none;
+            border-radius: 10px;
+        }
+
+        .btn-dashboard {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-dashboard:hover {
+            background: var(--primary-dark);
+        }
+
+        .btn-copy {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .btn-copy:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        /* Empty State */
+        .empty-state {
+            grid-column: 1 / -1;
+            text-align: center;
+            padding: 60px 20px;
+        }
+
+        .empty-icon {
+            font-size: 4em;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+
+        .empty-state h3 {
+            font-size: 1.5em;
+            margin-bottom: 10px;
+        }
+
+        .empty-state p {
+            opacity: 0.8;
+            max-width: 400px;
+            margin: 0 auto 25px;
+            line-height: 1.6;
+        }
+
+        /* Footer */
+        footer {
+            text-align: center;
+            margin-top: 50px;
+            padding-top: 30px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            opacity: 0.7;
+            font-size: 0.9em;
+        }
+
+        /* Loading State */
+        .loading {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 40px;
+            grid-column: 1 / -1;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid rgba(255, 255, 255, 0.1);
+            border-radius: 50%;
+            border-top-color: var(--primary);
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Toast Notification */
+        .toast {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            background: var(--dark);
+            color: white;
+            padding: 15px 25px;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            z-index: 1000;
+            transform: translateY(100px);
+            opacity: 0;
+            transition: all 0.3s ease;
+        }
+
+        .toast.show {
+            transform: translateY(0);
+            opacity: 1;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .container {
+                padding: 0 15px;
+            }
+            
+            .logo h1 {
+                font-size: 2em;
+            }
+            
+            .search-section, .devices-section {
+                padding: 25px;
+            }
+            
+            .input-group {
+                flex-direction: column;
+            }
+            
+            .devices-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .section-header {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .device-actions {
+                flex-direction: column;
+            }
+            
+            .toast {
+                left: 15px;
+                right: 15px;
+                bottom: 15px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .stats-container {
+                grid-template-columns: 1fr;
+            }
+            
+            .logo {
+                flex-direction: column;
+                gap: 10px;
+            }
+            
+            .logo h1 {
+                font-size: 1.8em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">
+                <i class="fas fa-satellite-dish"></i>
+                <h1>SatWebConnect</h1>
+            </div>
+            <p class="tagline">
+                ESP32-S3 cihazlarınızı tek bir merkezden yönetin. 
+                Her cihaz benzersiz <strong>sat_xxxxxxxx</strong> formatında tanımlanır.
+            </p>
+        </header>
+
+        <div class="stats-container">
+            <div class="stat-card">
+                <div class="stat-icon"><i class="fas fa-microchip"></i></div>
+                <div class="stat-value" id="totalDevices">0</div>
+                <div class="stat-label">Toplam Cihaz</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon"><i class="fas fa-wifi"></i></div>
+                <div class="stat-value" id="onlineDevices">0</div>
+                <div class="stat-label">Çevrimiçi</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon"><i class="fas fa-plug-circle-xmark"></i></div>
+                <div class="stat-value" id="offlineDevices">0</div>
+                <div class="stat-label">Çevrimdışı</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon"><i class="fas fa-clock"></i></div>
+                <div class="stat-value" id="lastUpdate">0s</div>
+                <div class="stat-label">Son Güncelleme</div>
+            </div>
+        </div>
+
+        <div class="search-section">
+            <h2><i class="fas fa-satellite"></i> Cihazınıza Bağlanın</h2>
+            <div class="search-box">
+                <div class="input-group">
+                    <input type="text" id="deviceInput" class="device-input" 
+                           placeholder="Cihaz adı girin (örn: sat_1A2B3C4D5E6F7G8H)"
+                           autocomplete="off">
+                    <button class="btn btn-primary" onclick="connectToDevice()">
+                        <i class="fas fa-link"></i> Bağlan
+                    </button>
+                </div>
+                <p class="search-hint">
+                    Cihaz adı formatı: <code>sat_</code> + 16 karakterlik hex chip ID
+                </p>
+            </div>
+        </div>
+
+        <div class="devices-section">
+            <div class="section-header">
+                <h2><i class="fas fa-list"></i> Kayıtlı Cihazlar</h2>
+                <button class="btn btn-refresh" onclick="loadDevices()">
+                    <i class="fas fa-rotate"></i> Yenile
+                </button>
+            </div>
+
+            <div class="devices-grid" id="devicesGrid">
+                <!-- Cihaz kartları buraya eklenecek -->
+                <div class="loading">
+                    <div class="spinner"></div>
+                </div>
+            </div>
+        </div>
+
+        <footer>
+            <p>© 2024 SatWebConnect - Tüm hakları saklıdır.</p>
+            <p>Bu dashboard ESP32-S3 cihazlarınızı yönetmek için tasarlanmıştır.</p>
+            <p style="margin-top: 10px;">
+                <a href="/health" style="color: var(--success); text-decoration: none;">
+                    <i class="fas fa-heart-pulse"></i> Sistem Sağlığı
+                </a>
+            </p>
+        </footer>
+    </div>
+
+    <!-- Toast Notification -->
+    <div class="toast" id="toast">
+        <i class="fas fa-check-circle"></i>
+        <span id="toastMessage">Başarıyla kopyalandı!</span>
+    </div>
+
+    <script>
+        // DOM Elements
+        const devicesGrid = document.getElementById('devicesGrid');
+        const deviceInput = document.getElementById('deviceInput');
+        const toast = document.getElementById('toast');
+        const toastMessage = document.getElementById('toastMessage');
+        
+        // Stats elements
+        const totalDevicesEl = document.getElementById('totalDevices');
+        const onlineDevicesEl = document.getElementById('onlineDevices');
+        const offlineDevicesEl = document.getElementById('offlineDevices');
+        const lastUpdateEl = document.getElementById('lastUpdate');
+        
+        // Global variables
+        let lastUpdateTime = Date.now();
+        let autoRefreshInterval;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            // Load devices on page load
+            loadDevices();
+            
+            // Set up auto-refresh every 30 seconds
+            autoRefreshInterval = setInterval(loadDevices, 30000);
+            
+            // Update last update counter every second
+            setInterval(updateLastUpdateCounter, 1000);
+            
+            // Enter key support for search
+            deviceInput.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    connectToDevice();
+                }
+            });
+        });
+
+        // Load devices from API
+        async function loadDevices() {
+            try {
+                showLoadingState();
+                
+                const response = await fetch('/api/devices');
+                const data = await response.json();
+                
+                if (data.success) {
+                    updateStats(data.devices);
+                    renderDevices(data.devices);
+                    lastUpdateTime = Date.now();
+                } else {
+                    showErrorState('Cihazlar yüklenemedi');
+                }
+            } catch (error) {
+                console.error('Error loading devices:', error);
+                showErrorState('Sunucuya bağlanılamadı');
+            }
+        }
+
+        // Update statistics
+        function updateStats(devices) {
+            const total = devices.length;
+            const online = devices.filter(d => d.isOnline).length;
+            const offline = total - online;
+            
+            totalDevicesEl.textContent = total;
+            onlineDevicesEl.textContent = online;
+            offlineDevicesEl.textContent = offline;
+        }
+
+        // Update last update counter
+        function updateLastUpdateCounter() {
+            const seconds = Math.floor((Date.now() - lastUpdateTime) / 1000);
+            
+            if (seconds < 60) {
+                lastUpdateEl.textContent = `${seconds}s`;
+            } else if (seconds < 3600) {
+                const minutes = Math.floor(seconds / 60);
+                lastUpdateEl.textContent = `${minutes}d`;
+            } else {
+                const hours = Math.floor(seconds / 3600);
+                lastUpdateEl.textContent = `${hours}s`;
+            }
+        }
+
+        // Render devices to the grid
+        function renderDevices(devices) {
+            if (!devices || devices.length === 0) {
+                devicesGrid.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon"><i class="fas fa-inbox"></i></div>
+                        <h3>Henüz cihaz bulunmuyor</h3>
+                        <p>İlk ESP32-S3 cihazınızı bağladığınızda burada görünecek.</p>
+                        <button class="btn btn-primary" onclick="loadDevices()">
+                            <i class="fas fa-rotate"></i> Yenile
+                        </button>
+                    </div>
+                `;
+                return;
+            }
+            
+            devicesGrid.innerHTML = devices.map(device => `
+                <div class="device-card ${device.isOnline ? 'online' : 'offline'}">
+                    <div class="device-header">
+                        <div class="device-name">${device.deviceName}</div>
+                        <div class="device-status ${device.isOnline ? 'status-online' : 'status-offline'}">
+                            <i class="fas ${device.isOnline ? 'fa-circle-check' : 'fa-circle-xmark'}"></i>
+                            ${device.isOnline ? 'Çevrimiçi' : 'Çevrimdışı'}
+                        </div>
+                    </div>
+                    
+                    <div class="device-info">
+                        <div class="info-item">
+                            <span class="info-label">Cihaz ID:</span>
+                            <span class="info-value">${device.deviceId}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">IP Adresi:</span>
+                            <span class="info-value">${device.ip}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Son Görülme:</span>
+                            <span class="info-value">${formatDate(device.lastSeen)}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Durum:</span>
+                            <span class="info-value">
+                                ${device.isOnline ? 
+                                    '<span style="color: #4cc9f0;">🟢 Aktif</span>' : 
+                                    '<span style="color: #f72585;">🔴 Kapalı</span>'
+                                }
+                            </span>
+                        </div>
+                    </div>
+                    
+                    <div class="device-actions">
+                        <a href="/dashboard/${device.deviceName}" 
+                           target="_blank" 
+                           class="btn-action btn-dashboard">
+                            <i class="fas fa-external-link-alt"></i> Dashboard'a Git
+                        </a>
+                        <button onclick="copyDeviceName('${device.deviceName}')" 
+                                class="btn-action btn-copy">
+                            <i class="fas fa-copy"></i> Kopyala
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Show loading state
+        function showLoadingState() {
+            devicesGrid.innerHTML = `
+                <div class="loading">
+                    <div class="spinner"></div>
+                </div>
+            `;
+        }
+
+        // Show error state
+        function showErrorState(message) {
+            devicesGrid.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon"><i class="fas fa-exclamation-triangle"></i></div>
+                    <h3>${message}</h3>
+                    <p>Lütfen daha sonra tekrar deneyin veya sayfayı yenileyin.</p>
+                        <button class="btn btn-primary" onclick="loadDevices()">
+                        <i class="fas fa-rotate"></i> Tekrar Dene
+                    </button>
+                </div>
+            `;
+        }
+
+        // Connect to a device by name
+        function connectToDevice() {
+            const deviceName = deviceInput.value.trim();
+            
+            if (!deviceName) {
+                showToast('Lütfen bir cihaz adı girin', 'warning');
+                deviceInput.focus();
+                return;
+            }
+            
+            // Validate device name format
+            if (!deviceName.startsWith('sat_') || deviceName.length < 13) {
+                if (confirm('Cihaz adı sat_xxxxxxxx formatında olmalıdır. Yine de denemek istiyor musunuz?')) {
+                    window.open(`/dashboard/${deviceName}`, '_blank');
+                }
+                return;
+            }
+            
+            window.open(`/dashboard/${deviceName}`, '_blank');
+            deviceInput.value = '';
+        }
+
+        // Copy device name to clipboard
+        function copyDeviceName(deviceName) {
+            navigator.clipboard.writeText(deviceName)
+                .then(() => {
+                    showToast(`"${deviceName}" panoya kopyalandı`, 'success');
+                })
+                .catch(err => {
+                    console.error('Copy failed:', err);
+                    showToast('Kopyalama başarısız', 'error');
+                });
+        }
+
+        // Show toast notification
+        function showToast(message, type = 'success') {
+            // Set message
+            toastMessage.textContent = message;
+            
+            // Set icon based on type
+            const icon = toast.querySelector('i');
+            if (type === 'success') {
+                icon.className = 'fas fa-check-circle';
+                toast.style.background = 'linear-gradient(135deg, #4cc9f0 0%, #4361ee 100%)';
+            } else if (type === 'error') {
+                icon.className = 'fas fa-exclamation-circle';
+                toast.style.background = 'linear-gradient(135deg, #f72585 0%, #7209b7 100%)';
+            } else if (type === 'warning') {
+                icon.className = 'fas fa-exclamation-triangle';
+                toast.style.background = 'linear-gradient(135deg, #f8961e 0%, #f72585 100%)';
+            }
+            
+            // Show toast
+            toast.classList.add('show');
+            
+            // Hide after 3 seconds
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
+        // Format date for display
+        function formatDate(dateString) {
+            const date = new Date(dateString);
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+            
+            if (diffMins < 1) {
+                return 'Az önce';
+            }
+            
+            if (diffMins < 60) {
+                return `${diffMins} dakika önce`;
+            }
+            
+            const diffHours = Math.floor(diffMins / 60);
+            if (diffHours < 24) {
+                return `${diffHours} saat önce`;
+            }
+            
+            const diffDays = Math.floor(diffHours / 24);
+            if (diffDays < 7) {
+                return `${diffDays} gün önce`;
+            }
+            
+            // Return formatted date for older dates
+            return date.toLocaleDateString('tr-TR', {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+
+        // Clean up on page unload
+        window.addEventListener('beforeunload', function() {
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+            }
+        });
+    </script>
+</body>
+</html>
