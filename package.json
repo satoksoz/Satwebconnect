@@ -1,7 +1,7 @@
 {
   "name": "satwebconnect",
   "version": "1.0.0",
-  "description": "ESP32 IoT Dashboard",
+  "description": "ESP32 IoT Dashboard Server",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
