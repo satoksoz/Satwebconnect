@@ -1,6 +1,7 @@
 {
   "name": "satwebconnect",
   "version": "1.0.0",
+  "description": "ESP32 IoT Dashboard",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -10,5 +11,16 @@
     "express": "^4.18.2",
     "ws": "^8.14.2",
     "cors": "^2.8.5"
-  }
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "keywords": [
+    "esp32",
+    "iot",
+    "dashboard",
+    "websocket"
+  ],
+  "author": "SatWeb Connect",
+  "license": "MIT"
 }
