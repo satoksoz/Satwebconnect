@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SatWeb Connect - Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1><i class="fas fa-satellite"></i> SatWeb Connect</h1>
+            <p>ESP32 IoT Cihaz Yönetim Paneli</p>
+        </header>
+
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-icon"><i class="fas fa-microchip"></i></div>
+                <div class="stat-value" id="totalDevices">0</div>
+                <div class="stat-label">Toplam Cihaz</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon"><i class="fas fa-wifi"></i></div>
+                <div class="stat-value" id="onlineDevices">0</div>
+                <div class="stat-label">Çevrimiçi</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon"><i class="fas fa-plug-circle-xmark"></i></div>
+                <div class="stat-value" id="offlineDevices">0</div>
+                <div class="stat-label">Çevrimdışı</div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <h2><i class="fas fa-gamepad"></i> Hızlı Kontroller</h2>
+            <div class="button-group">
+                <button class="btn btn-primary" onclick="sendCommandToAll('LED_ON')">
+                    <i class="fas fa-lightbulb"></i> Tüm LED'leri Aç
+                </button>
+                <button class="btn btn-secondary" onclick="sendCommandToAll('LED_OFF')">
+                    <i class="fas fa-lightbulb"></i> Tüm LED'leri Kapat
+                </button>
+                <button class="btn btn-info" onclick="sendCommandToAll('GET_STATUS')">
+                    <i class="fas fa-sync-alt"></i> Durumları Güncelle
+                </button>
+            </div>
+        </div>
+
+        <div class="devices">
+            <h2><i class="fas fa-list"></i> Bağlı Cihazlar</h2>
+            <div id="devicesContainer" class="devices-grid">
+                <!-- Cihaz kartları buraya gelecek -->
+                <div class="no-devices" id="noDevicesMessage">
+                    <i class="fas fa-inbox"></i>
+                    <p>Bağlı cihaz bulunamadı</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="log-section">
+            <h2><i class="fas fa-terminal"></i> Sistem Logları</h2>
+            <div class="log-container" id="logContainer">
+                <div class="log-entry">
+                    <span class="log-time">[00:00:00]</span>
+                    <span class="log-message">Sistem başlatıldı...</span>
+                </div>
+            </div>
+            <button class="btn btn-clear" onclick="clearLogs()">
+                <i class="fas fa-trash"></i> Logları Temizle
+            </button>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
