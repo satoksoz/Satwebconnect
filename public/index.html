@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<body>
+<h2>Online ESP32 Cihazlar</h2>
+<ul id="list"></ul>
+
+<script>
+fetch("/devices")
+  .then(r=>r.json())
+  .then(d=>{
+    const ul=document.getElementById("list");
+    d.forEach(id=>{
+      ul.innerHTML+=`
+        <li>
+          ${id}
+          <form action="/ota/${id}" method="post" enctype="multipart/form-data">
+            <input type="file" name="firmware">
+            <button>OTA</button>
+          </form>
+          <a href="/device/${id}" target="_blank">HTML Aç</a>
+        </li>`;
+    });
+  });
+</script>
+</body>
+</html>
