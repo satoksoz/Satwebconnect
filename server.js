@@ -10,6 +10,15 @@ app.use(express.urlencoded({ extended: true }));
 // Serve static files from current directory
 app.use(express.static(__dirname));
 
+// Debug middleware - tüm istekleri logla
+app.use((req, res, next) => {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+    if (req.method === 'POST' && req.body) {
+        console.log('Body:', JSON.stringify(req.body).substring(0, 200));
+    }
+    next();
+});
+
 // CORS
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
@@ -135,15 +144,18 @@ app.get('/', (req, res) => {
 // OTA Dashboard
 app.get('/ota.html', (req, res) => {
     const deviceId = req.query.device;
+    console.log(`📱 OTA dashboard requested for device: ${deviceId}`);
     res.sendFile(path.join(__dirname, 'dashboard.html'));
 });
 
 // Device access - root path
 app.get('/device/:deviceId', (req, res) => {
     const deviceId = req.params.deviceId;
-    const device = devices.get(deviceId);
+    console.log(`📱 Device access requested: ${deviceId}`);
     
+    const device = devices.get(deviceId);
     if (!device || (Date.now() - device.lastSeen) > 30000) {
+        console.log(`❌ Device ${deviceId} is offline`);
         return res.status(503).send(`
             <html><body style="text-align:center;padding:50px;">
                 <h1>Device Offline</h1>
@@ -170,6 +182,7 @@ app.get('/device/:deviceId', (req, res) => {
     // Create pending request
     const timeout = setTimeout(() => {
         pendingRequests.delete(requestId);
+        console.log(`⏰ Request timeout: ${requestId}`);
         res.status(504).send('Request timeout');
     }, 30000);
     
@@ -177,6 +190,8 @@ app.get('/device/:deviceId', (req, res) => {
         timeout: timeout,
         res: res
     });
+    
+    console.log(`📤 Command sent to device: ${requestId}`);
 });
 
 // Device access - any path
@@ -184,8 +199,11 @@ app.get('/device/:deviceId/*', async (req, res) => {
     const deviceId = req.params.deviceId;
     const path = req.params[0] || 'index.html';
     
+    console.log(`📱 Device access requested: ${deviceId}/${path}`);
+    
     const device = devices.get(deviceId);
     if (!device || (Date.now() - device.lastSeen) > 30000) {
+        console.log(`❌ Device ${deviceId} is offline`);
         return res.status(503).send(`
             <html><body style="text-align:center;padding:50px;">
                 <h1>Device Offline</h1>
@@ -212,6 +230,7 @@ app.get('/device/:deviceId/*', async (req, res) => {
     // Create pending request
     const timeout = setTimeout(() => {
         pendingRequests.delete(requestId);
+        console.log(`⏰ Request timeout: ${requestId}`);
         res.status(504).send('Request timeout');
     }, 30000);
     
@@ -219,6 +238,8 @@ app.get('/device/:deviceId/*', async (req, res) => {
         timeout: timeout,
         res: res
     });
+    
+    console.log(`📤 Command sent to device: ${requestId}`);
 });
 
 // Register
@@ -261,6 +282,7 @@ app.post('/api/poll', (req, res) => {
     // Check queue
     if (device.queue.length > 0) {
         const command = device.queue.shift();
+        console.log(`📥 Sending command to ${deviceId}: ${command.type}`);
         res.json(command);
     } else {
         res.status(204).end();
@@ -271,6 +293,10 @@ app.post('/api/poll', (req, res) => {
 app.post('/api/response', (req, res) => {
     const { requestId, contentType, body } = req.body;
     
+    console.log(`📥 Received response for request: ${requestId}`);
+    console.log(`📊 Content-Type: ${contentType}`);
+    console.log(`📦 Body length: ${body ? body.length : 0}`);
+    
     const pending = pendingRequests.get(requestId);
     if (pending) {
         pendingRequests.delete(requestId);
@@ -278,7 +304,9 @@ app.post('/api/response', (req, res) => {
         
         res.set('Content-Type', contentType);
         res.send(body);
+        console.log(`✅ Response forwarded successfully`);
     } else {
+        console.log(`❌ Request not found: ${requestId}`);
         res.status(404).json({ error: 'Request not found' });
     }
 });
@@ -331,6 +359,8 @@ app.post('/api/upload', upload.single('firmware'), (req, res) => {
         bytesSent: 0
     });
     
+    console.log(`📁 Firmware uploaded for ${deviceId}: ${req.file.originalname} (${req.file.size} bytes)`);
+    
     res.json({
         success: true,
         fileName: req.file.originalname,
@@ -371,6 +401,8 @@ app.post('/api/ota/start', (req, res) => {
     // Reset progress
     otaSession.progress = 0;
     otaSession.bytesSent = 0;
+    
+    console.log(`🚀 OTA started for ${deviceId}, file: ${otaSession.fileName}`);
     
     res.json({
         success: true,
@@ -418,6 +450,7 @@ app.post('/api/ota/cancel', (req, res) => {
         }
         
         otaSessions.delete(deviceId);
+        console.log(`❌ OTA cancelled for ${deviceId}`);
     }
     
     res.json({ success: true });
