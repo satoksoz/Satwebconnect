@@ -1,6 +1,7 @@
+// server.js
 import express from "express";
 import http from "http";
-import WebSocket, { WebSocketServer } from "ws";
+import { WebSocketServer } from "ws";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
@@ -9,28 +10,39 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-const upload = multer({ dest: "uploads/" });
-const devices = new Map();
+const PORT = process.env.PORT || 3000;
 
+// === ESP32 bağlantıları ===
+const devices = new Map(); // deviceId -> ws
+
+// === Static dashboard ===
 app.use(express.static("public"));
+app.use(express.json());
 
-/* =========================
-   DASHBOARD
-========================= */
-app.get("/", (req, res) => {
-  res.sendFile(path.resolve("public/index.html"));
-});
-
-app.get("/devices", (req, res) => {
+// === Dashboard API ===
+app.get("/api/devices", (req, res) => {
   res.json([...devices.keys()]);
 });
 
-/* =========================
-   OTA UPLOAD
-========================= */
-app.post("/ota/:id", upload.single("firmware"), (req, res) => {
-  const ws = devices.get(req.params.id);
-  if (!ws) return res.status(404).send("offline");
+// === Reverse HTML Proxy ===
+app.get("/proxy/:deviceId/*", (req, res) => {
+  const ws = devices.get(req.params.deviceId);
+  if (!ws) return res.status(404).send("Device offline");
+
+  const path = "/" + req.params[0];
+  ws.send(JSON.stringify({ type: "HTTP_GET", path }));
+
+  ws.once("message", msg => {
+    res.send(msg.toString());
+  });
+});
+
+// === OTA Upload ===
+const upload = multer({ dest: "tmp/" });
+
+app.post("/ota/:deviceId", upload.single("firmware"), (req, res) => {
+  const ws = devices.get(req.params.deviceId);
+  if (!ws) return res.status(404).send("Device offline");
 
   const file = fs.readFileSync(req.file.path);
 
@@ -40,74 +52,47 @@ app.post("/ota/:id", upload.single("firmware"), (req, res) => {
   }));
 
   const CHUNK = 1024;
-  for (let i = 0; i < file.length; i += CHUNK) {
-    ws.send(file.slice(i, i + CHUNK));
+  let sent = 0;
+
+  while (sent < file.length) {
+    ws.send(file.slice(sent, sent + CHUNK));
+    sent += CHUNK;
   }
 
   ws.send(JSON.stringify({ type: "OTA_END" }));
   fs.unlinkSync(req.file.path);
 
-  res.send("OTA SENT");
+  res.send("OTA started");
 });
 
-/* =========================
-   HTML STREAM REQUEST
-========================= */
-app.get("/device/:id", (req, res) => {
-  const ws = devices.get(req.params.id);
-  if (!ws) return res.send("Cihaz offline");
-
-  ws.send(JSON.stringify({ type: "HTML_REQUEST" }));
-
-  res.send(`
-    <iframe src="/stream/${req.params.id}"
-      style="width:100%;height:100vh;border:none"></iframe>
-  `);
-});
-
-/* =========================
-   STREAM HTML
-========================= */
-app.get("/stream/:id", (req, res) => {
-  const ws = devices.get(req.params.id);
-  if (!ws) return res.end("offline");
-
-  ws.htmlClient = res;
-  req.on("close", () => ws.htmlClient = null);
-});
-
-/* =========================
-   WEBSOCKET
-========================= */
+// === WebSocket ===
 wss.on("connection", (ws, req) => {
-  const params = new URLSearchParams(req.url.replace("/?", ""));
-  const id = params.get("deviceId");
+  const url = new URL(req.url, "http://x");
+  const deviceId = url.searchParams.get("deviceId");
 
-  if (!id) return ws.close();
+  if (!deviceId) {
+    ws.close();
+    return;
+  }
 
-  devices.set(id, ws);
-  console.log("🟢 ESP32 bağlı:", id);
+  devices.set(deviceId, ws);
+  console.log("🟢 Device connected:", deviceId);
 
-  ws.on("message", data => {
-    if (Buffer.isBuffer(data)) {
-      if (ws.htmlClient) ws.htmlClient.write(data);
-      return;
-    }
-
-    const msg = JSON.parse(data.toString());
-
-    if (msg.type === "HTML_END" && ws.htmlClient) {
-      ws.htmlClient.end();
-      ws.htmlClient = null;
-    }
+  ws.on("message", msg => {
+    try {
+      const data = JSON.parse(msg);
+      if (data.type === "OTA_PROGRESS") {
+        console.log(`📦 ${deviceId} OTA %${data.percent}`);
+      }
+    } catch {}
   });
 
   ws.on("close", () => {
-    devices.delete(id);
-    console.log("🔴 ESP32 koptu:", id);
+    devices.delete(deviceId);
+    console.log("🔴 Device disconnected:", deviceId);
   });
 });
 
-server.listen(process.env.PORT || 3000, () => {
-  console.log("🚀 Server hazır");
-});
+server.listen(PORT, () =>
+  console.log("🚀 Server running on", PORT)
+);

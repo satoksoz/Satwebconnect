@@ -1,26 +1,32 @@
 <!DOCTYPE html>
 <html>
+<head>
+<meta charset="UTF-8">
+<title>ESP32 Dashboard</title>
+</head>
 <body>
-<h2>Online ESP32 Cihazlar</h2>
+<h1>Online ESP32 Cihazlar</h1>
 <ul id="list"></ul>
 
 <script>
-fetch("/devices")
-  .then(r=>r.json())
-  .then(d=>{
-    const ul=document.getElementById("list");
-    d.forEach(id=>{
-      ul.innerHTML+=`
-        <li>
-          ${id}
-          <form action="/ota/${id}" method="post" enctype="multipart/form-data">
-            <input type="file" name="firmware">
-            <button>OTA</button>
-          </form>
-          <a href="/device/${id}" target="_blank">HTML Aç</a>
-        </li>`;
-    });
+async function load() {
+  const res = await fetch("/api/devices");
+  const devices = await res.json();
+  const ul = document.getElementById("list");
+  ul.innerHTML = "";
+  devices.forEach(d => {
+    const li = document.createElement("li");
+    li.innerHTML = `
+      ${d}
+      <a href="/proxy/${d}/">HTML</a>
+      <form action="/ota/${d}" method="post" enctype="multipart/form-data">
+        <input type="file" name="firmware">
+        <button>OTA</button>
+      </form>`;
+    ul.appendChild(li);
   });
+}
+setInterval(load, 2000);
 </script>
 </body>
 </html>
