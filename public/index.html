@@ -1,32 +1,51 @@
 <!DOCTYPE html>
-<html>
+<html lang="tr">
 <head>
-<meta charset="UTF-8">
-<title>ESP32 Dashboard</title>
+  <meta charset="UTF-8">
+  <title>ESP32 OTA Panel</title>
 </head>
 <body>
-<h1>Online ESP32 Cihazlar</h1>
-<ul id="list"></ul>
+
+<h2>ESP32 OTA</h2>
+
+<select id="device">
+  <option value="Sat_C812AF453AB4">Sat_C812AF453AB4</option>
+</select>
+
+<br><br>
+
+<input type="file" id="binFile" accept=".bin">
+
+<br><br>
+
+<button onclick="uploadOTA()">OTA Yükle</button>
+
+<pre id="log"></pre>
 
 <script>
-async function load() {
-  const res = await fetch("/api/devices");
-  const devices = await res.json();
-  const ul = document.getElementById("list");
-  ul.innerHTML = "";
-  devices.forEach(d => {
-    const li = document.createElement("li");
-    li.innerHTML = `
-      ${d}
-      <a href="/proxy/${d}/">HTML</a>
-      <form action="/ota/${d}" method="post" enctype="multipart/form-data">
-        <input type="file" name="firmware">
-        <button>OTA</button>
-      </form>`;
-    ul.appendChild(li);
+async function uploadOTA() {
+  const fileInput = document.getElementById("binFile");
+  const device = document.getElementById("device").value;
+  const log = document.getElementById("log");
+
+  if (!fileInput.files.length) {
+    alert("BIN dosyası seç!");
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("firmware", fileInput.files[0]);
+
+  log.textContent = "Yükleniyor...\n";
+
+  const res = await fetch(`/ota/${device}`, {
+    method: "POST",
+    body: formData
   });
+
+  log.textContent += await res.text();
 }
-setInterval(load, 2000);
 </script>
+
 </body>
 </html>
