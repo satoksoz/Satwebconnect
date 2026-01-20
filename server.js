@@ -1,227 +1,236 @@
-// server.js - SHORT POLLING
 const express = require('express');
-const multer = require('multer');
-
 const app = express();
+
+// Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Device storage
-const devices = new Map();
-const pendingRequests = new Map();
-
-// Cleanup interval
-setInterval(() => {
-    const now = Date.now();
-    
-    // Clean old devices (1 dakika)
-    devices.forEach((device, deviceId) => {
-        if (now - device.lastSeen > 60000) {
-            devices.delete(deviceId);
-            console.log(`🧹 Cleaned: ${deviceId}`);
-        }
-    });
-    
-    // Clean old pending requests (10 saniye)
-    pendingRequests.forEach((request, requestId) => {
-        if (now - request.timestamp > 10000) {
-            pendingRequests.delete(requestId);
-            console.log(`🧹 Cleaned request: ${requestId}`);
-        }
-    });
-}, 30000);
-
-// 1. REGISTER endpoint
-app.post('/api/register', (req, res) => {
-    const { deviceId, ip } = req.body;
-    
-    if (!deviceId || !deviceId.startsWith('Sat_')) {
-        return res.status(400).json({ error: 'Invalid device ID' });
+// CORS - ESP32 için gerekli
+app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    if (req.method === 'OPTIONS') {
+        return res.sendStatus(200);
     }
-    
-    const sessionId = 'sess_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
-    
-    devices.set(deviceId, {
-        sessionId: sessionId,
-        ip: ip,
-        lastSeen: Date.now(),
-        commandQueue: []
-    });
-    
-    console.log(`✅ Registered: ${deviceId}`);
-    
-    res.json({ 
-        sessionId: sessionId,
-        status: 'registered',
-        pollInterval: 5000 // 5 saniye
+    next();
+});
+
+// Health check - RENDER ZORUNLU
+app.get('/health', (req, res) => {
+    res.json({
+        status: 'ok',
+        devices: Object.keys(devices).length,
+        timestamp: new Date().toISOString(),
+        message: 'SAT Web Connect - Render.com'
     });
 });
 
-// 2. SHORT POLL endpoint
+// Root endpoint
+app.get('/', (req, res) => {
+    res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>SAT Web Connect</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                max-width: 800px;
+                margin: 0 auto;
+                padding: 40px;
+                text-align: center;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                min-height: 100vh;
+            }
+            .card {
+                background: rgba(255,255,255,0.1);
+                backdrop-filter: blur(10px);
+                border-radius: 20px;
+                padding: 40px;
+                box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+            }
+            h1 {
+                font-size: 2.5em;
+                margin-bottom: 20px;
+            }
+            .status {
+                display: inline-block;
+                padding: 10px 20px;
+                background: rgba(76, 175, 80, 0.3);
+                border-radius: 20px;
+                margin: 20px 0;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <h1>🚀 SAT Web Connect</h1>
+            <div class="status">🟢 Server Running</div>
+            <p>ESP32 Reverse Tunnel System on Render.com</p>
+            <p>Connected devices: ${Object.keys(devices).length}</p>
+            <div style="margin-top: 30px;">
+                <a href="/health" style="color: white; text-decoration: underline;">Health Check</a> |
+                <a href="/api/devices" style="color: white; text-decoration: underline;">Devices API</a>
+            </div>
+        </div>
+    </body>
+    </html>
+    `);
+});
+
+// Device storage
+const devices = {};
+
+// 1. Register endpoint
+app.post('/api/register', (req, res) => {
+    console.log('📝 Register request:', req.body);
+    
+    const { deviceId, ip, timestamp } = req.body;
+    
+    if (!deviceId || !deviceId.startsWith('Sat_')) {
+        return res.status(400).json({ 
+            error: 'Invalid device ID',
+            expected: 'Sat_XXXXX format'
+        });
+    }
+    
+    const sessionId = 'render_' + Date.now() + '_' + Math.random().toString(36).substr(2, 8);
+    
+    devices[deviceId] = {
+        sessionId: sessionId,
+        ip: ip,
+        lastSeen: Date.now(),
+        registeredAt: new Date().toISOString(),
+        timestamp: timestamp || Date.now()
+    };
+    
+    console.log(`✅ Device registered: ${deviceId}`);
+    
+    res.json({
+        sessionId: sessionId,
+        status: 'registered',
+        message: `Device ${deviceId} registered successfully`,
+        serverTime: new Date().toISOString(),
+        pollEndpoint: '/api/poll',
+        pollInterval: 10000
+    });
+});
+
+// 2. Poll endpoint
 app.post('/api/poll', (req, res) => {
-    const { deviceId, session } = req.body;
+    const { deviceId, session, timestamp } = req.body;
     
-    const device = devices.get(deviceId);
+    console.log(`📡 Poll request from: ${deviceId}`);
     
-    // Validation
+    const device = devices[deviceId];
+    
     if (!device) {
-        return res.status(404).json({ error: 'Device not found' });
+        return res.status(404).json({ 
+            error: 'Device not found',
+            suggestion: 'Register first at /api/register'
+        });
     }
     
     if (device.sessionId !== session) {
-        return res.status(401).json({ error: 'Invalid session' });
+        return res.status(401).json({ 
+            error: 'Invalid session',
+            suggestion: 'Re-register device'
+        });
     }
     
     // Update last seen
     device.lastSeen = Date.now();
     
-    // Check for pending commands
-    if (device.commandQueue.length > 0) {
-        const command = device.commandQueue.shift();
-        res.json(command);
+    // Test için basit bir komut gönder (ilk poll'da)
+    if (!device.hasReceivedCommand) {
+        device.hasReceivedCommand = true;
+        
+        res.json({
+            type: 'http_request',
+            requestId: 'test_' + Date.now(),
+            path: '/index.html',
+            method: 'GET',
+            timestamp: new Date().toISOString()
+        });
     } else {
-        // No commands - return 204 (No Content)
+        // No commands available
         res.status(204).end();
     }
 });
 
-// 3. RESPONSE endpoint
+// 3. Response endpoint
 app.post('/api/response', (req, res) => {
+    console.log('📤 Response received:', req.body.requestId);
+    
     const { requestId, contentType, body } = req.body;
     
-    const pending = pendingRequests.get(requestId);
-    if (pending) {
-        pendingRequests.delete(requestId);
-        
-        res.set('Content-Type', contentType);
-        res.send(body);
-    } else {
-        res.status(404).json({ error: 'Request not found' });
-    }
-});
-
-// 4. DASHBOARD
-app.get('/', (req, res) => {
-    let html = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>SAT Dashboard</title>
-        <style>
-            body { font-family: Arial; padding: 20px; }
-            .device {
-                border: 1px solid #ccc;
-                padding: 15px;
-                margin: 10px 0;
-                border-radius: 5px;
-                background: #f9f9f9;
-            }
-            .online { border-left: 5px solid green; }
-            .offline { border-left: 5px solid red; }
-        </style>
-    </head>
-    <body>
-        <h1>📡 SAT Dashboard</h1>
-        <p>Short Polling System</p>
-    `;
-    
-    let onlineCount = 0;
-    devices.forEach((device, deviceId) => {
-        const isOnline = (Date.now() - device.lastSeen) < 30000;
-        if (isOnline) onlineCount++;
-        
-        html += `
-        <div class="device ${isOnline ? 'online' : 'offline'}">
-            <h3>${deviceId}</h3>
-            <p>IP: ${device.ip}</p>
-            <p>Status: ${isOnline ? '🟢 Online' : '🔴 Offline'}</p>
-            <a href="/device/${deviceId}" target="_blank">Access Device</a>
-        </div>`;
-    });
-    
-    html += `<p>Online devices: ${onlineCount}</p>`;
-    html += `
-        <script>
-            setTimeout(() => location.reload(), 10000);
-        </script>
-    </body>
-    </html>`;
-    
-    res.send(html);
-});
-
-// 5. DEVICE ACCESS
-app.get('/device/:deviceId/*', async (req, res) => {
-    const deviceId = req.params.deviceId;
-    const path = req.params[0] || 'index.html';
-    
-    const device = devices.get(deviceId);
-    
-    // Check if device is online (30 seconds)
-    if (!device || (Date.now() - device.lastSeen) > 30000) {
-        return res.status(503).send(`
-            <html>
-            <body style="text-align:center;padding:50px;">
-                <h1>🔴 Device Offline</h1>
-                <p>${deviceId} is not connected</p>
-                <a href="/">Back to Dashboard</a>
-            </body>
-            </html>
-        `);
-    }
-    
-    // Create request
-    const requestId = 'req_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
-    
-    // Add to device queue
-    device.commandQueue.push({
-        type: 'http_request',
-        requestId: requestId,
-        path: path
-    });
-    
-    // Wait for response with timeout
-    try {
-        const response = await new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => {
-                pendingRequests.delete(requestId);
-                reject(new Error('Timeout'));
-            }, 5000);
-            
-            pendingRequests.set(requestId, {
-                res: res,
-                timeout: timeout,
-                timestamp: Date.now()
-            });
-        });
-    } catch (error) {
-        res.status(504).send(`
-            <html>
-            <body style="text-align:center;padding:50px;">
-                <h1>⏱️ Timeout</h1>
-                <p>Device did not respond in time</p>
-                <a href="/">Back to Dashboard</a>
-            </body>
-            </html>
-        `);
-    }
-});
-
-app.get('/device/:deviceId', (req, res) => {
-    res.redirect(`/device/${req.params.deviceId}/index.html`);
-});
-
-// 6. HEALTH CHECK
-app.get('/health', (req, res) => {
     res.json({
-        status: 'ok',
-        devices: devices.size,
+        status: 'received',
+        requestId: requestId,
+        receivedAt: new Date().toISOString(),
+        note: 'Response stored successfully'
+    });
+});
+
+// 4. Devices list
+app.get('/api/devices', (req, res) => {
+    const deviceList = Object.keys(devices).map(deviceId => {
+        const device = devices[deviceId];
+        return {
+            deviceId: deviceId,
+            ip: device.ip,
+            lastSeen: device.lastSeen,
+            registeredAt: device.registeredAt,
+            isOnline: (Date.now() - device.lastSeen) < 30000
+        };
+    });
+    
+    res.json({
+        count: deviceList.length,
+        devices: deviceList,
         timestamp: new Date().toISOString()
+    });
+});
+
+// 5. Cleanup old devices (her 5 dakikada)
+setInterval(() => {
+    const now = Date.now();
+    let cleaned = 0;
+    
+    Object.keys(devices).forEach(deviceId => {
+        if (now - devices[deviceId].lastSeen > 300000) { // 5 dakika
+            delete devices[deviceId];
+            cleaned++;
+            console.log(`🧹 Cleaned device: ${deviceId}`);
+        }
+    });
+    
+    if (cleaned > 0) {
+        console.log(`Cleaned ${cleaned} inactive devices`);
+    }
+}, 300000);
+
+// 6. 404 handler
+app.use((req, res) => {
+    res.status(404).json({
+        error: 'Endpoint not found',
+        availableEndpoints: [
+            'GET  /',
+            'GET  /health',
+            'POST /api/register',
+            'POST /api/poll',
+            'POST /api/response',
+            'GET  /api/devices'
+        ]
     });
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
-    console.log(`📊 Dashboard: http://localhost:${PORT}`);
+    console.log(`🚀 SAT Server running on port ${PORT}`);
+    console.log(`📊 Dashboard: https://satwebconnect.onrender.com`);
+    console.log(`🔧 Health: https://satwebconnect.onrender.com/health`);
+    console.log(`📱 Register: POST https://satwebconnect.onrender.com/api/register`);
 });
