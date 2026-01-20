@@ -1,72 +1,76 @@
-import express from 'express';
-import multer from 'multer';
-import { WebSocketServer } from 'ws';
-import http from 'http';
-import path from 'path';
+const express = require("express");
+const http = require("http");
+const WebSocket = require("ws");
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
+const cors = require("cors");
 
-const __dirname = path.resolve();
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
+const wss = new WebSocket.Server({ noServer: true });
 
-const upload = multer();
-const devices = new Map(); // deviceId -> ws
+// Cihaz listesi: deviceId => ws
+const devices = new Map();
 
-// Static dosyalar
-app.use(express.static(path.join(__dirname, 'public')));
+// OTA yükleme için multer
+const upload = multer({ dest: path.join(__dirname, "uploads/") });
 
-// WebSocket bağlantısı
-wss.on('connection', (ws, req) => {
-  let deviceId = null;
+// Statik dosyalar
+app.use(express.static(path.join(__dirname, "public")));
+app.use(cors());
+app.use(express.json());
 
-  ws.on('message', (msg) => {
-    try {
-      const data = JSON.parse(msg.toString());
-      if (data.type === 'REGISTER') {
-        deviceId = data.deviceId;
-        devices.set(deviceId, ws);
-        console.log(`📡 ESP32 Online: ${deviceId}`);
-        ws.send(JSON.stringify({ type: 'REGISTERED', deviceId }));
-      }
-      if (data.type === 'PONG') {
-        // Ping cevabı
-      }
-    } catch(e) {
-      console.log('Mesaj:', msg.toString());
-    }
-  });
+// WebSocket upgrade
+server.on("upgrade", (request, socket, head) => {
+  const url = new URL(request.url, `http://${request.headers.host}`);
+  const deviceId = url.searchParams.get("deviceId");
+  if (!deviceId) {
+    socket.destroy();
+    return;
+  }
 
-  ws.on('close', () => {
-    if(deviceId) {
+  wss.handleUpgrade(request, socket, head, (ws) => {
+    ws.deviceId = deviceId;
+    devices.set(deviceId, ws);
+    ws.send(JSON.stringify({ type: "CONNECTED", deviceId }));
+    
+    ws.on("message", (msg) => {
+      console.log(`📨 CMD from ${deviceId}: ${msg}`);
+    });
+
+    ws.on("close", () => {
       devices.delete(deviceId);
-      console.log(`🔴 ESP32 Offline: ${deviceId}`);
-    }
+      console.log(`🔴 ${deviceId} disconnected`);
+    });
   });
 });
 
-// OTA Route
-app.post('/ota/:deviceId', upload.single('file'), async (req, res) => {
-  const deviceId = req.params.deviceId;
-  const ws = devices.get(deviceId);
+// OTA yükleme endpoint
+app.post("/ota/:deviceId", upload.single("binfile"), (req, res) => {
+  const ws = devices.get(req.params.deviceId);
+  if (!ws) return res.status(404).send("Cihaz offline");
 
-  if(!ws || ws.readyState !== ws.OPEN){
-    return res.status(404).send("ESP32 offline");
-  }
+  const filePath = req.file.path;
+  const size = fs.statSync(filePath).size;
 
-  console.log(`OTA Başlıyor: ${deviceId}, boyut: ${req.file.size}`);
-  ws.send(JSON.stringify({ type: "OTA_BEGIN", size: req.file.size }));
+  ws.send(JSON.stringify({ type: "OTA_BEGIN", size }));
 
-  const CHUNK_SIZE = 4096;
-  const data = req.file.buffer;
+  // Dosyayı parça parça gönder
+  const chunkSize = 1024;
+  const readStream = fs.createReadStream(filePath, { highWaterMark: chunkSize });
 
-  for(let i=0; i<data.length; i+=CHUNK_SIZE){
-    const end = Math.min(i+CHUNK_SIZE, data.length);
-    ws.send(data.slice(i, end));
-  }
+  readStream.on("data", (chunk) => {
+    ws.send(JSON.stringify({ type: "OTA_DATA", chunk: chunk.toString("base64") }));
+  });
 
-  ws.send(JSON.stringify({ type: "OTA_END" }));
-  res.send("OTA gönderildi");
+  readStream.on("end", () => {
+    ws.send(JSON.stringify({ type: "OTA_END" }));
+    res.send("OTA gönderildi");
+    fs.unlinkSync(filePath); // temp dosya sil
+  });
 });
 
+// Başlangıç
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Server çalışıyor: http://localhost:${PORT}`));
+server.listen(PORT, () => console.log(`🚀 Server çalışıyor: http://localhost:${PORT}`));

@@ -6,18 +6,21 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<h1>SatWebConnect ESP32 Dashboard</h1>
+<h1>SatWebConnect Dashboard</h1>
 
-<div id="devices"></div>
+<div id="devicePanel">
+  <h2>Online Cihazlar</h2>
+  <ul id="devices"></ul>
+</div>
 
-<hr>
-<h2>OTA Yükleme</h2>
-<select id="deviceSelect"></select>
-<input type="file" id="otaFile">
-<button onclick="uploadOTA()">OTA Yükle</button>
+<div id="otaPanel">
+  <h2>OTA Panel</h2>
+  <select id="deviceSelect"></select>
+  <input type="file" id="binFile">
+  <button id="otaBtn">OTA Yükle</button>
+  <div id="otaStatus"></div>
+</div>
 
-<pre id="log"></pre>
-
-<script src="main.js"></script>
+<script src="ota.js"></script>
 </body>
 </html>
