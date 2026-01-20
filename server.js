@@ -1,65 +1,54 @@
-import express from "express";
-import http from "http";
-import WebSocket, { WebSocketServer } from "ws";
-import multer from "multer";
-import path from "path";
-import { fileURLToPath } from "url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import express from 'express';
+import http from 'http';
+import { WebSocketServer } from 'ws';
+import multer from 'multer';
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ server, path: '/ws' });
 
-const upload = multer({ storage: multer.memoryStorage() });
-const devices = new Map();
+const devices = new Map(); // deviceId => ws
+app.use(express.json());
+app.use(express.static('public')); // dashboard html
 
-/* -------------------- STATIC DASHBOARD -------------------- */
-app.use(express.static(path.join(__dirname, "public")));
-
-/* -------------------- WS HANDLER -------------------- */
-wss.on("connection", (ws, req) => {
-  const url = new URL(req.url, "http://localhost");
-  const deviceId = url.searchParams.get("deviceId");
-
-  if (!deviceId) {
-    ws.close();
-    return;
-  }
+// WebSocket bağlantısı
+wss.on('connection', (ws, req) => {
+  const urlParams = new URLSearchParams(req.url.replace('/ws?', ''));
+  const deviceId = urlParams.get('deviceId');
+  if(!deviceId) return ws.close();
 
   devices.set(deviceId, ws);
-  console.log("🟢 ESP32 bağlandı:", deviceId);
+  console.log("Device connected:", deviceId);
 
-  ws.on("message", msg => {
-    console.log("📨", deviceId, msg.toString());
-  });
-
-  ws.on("close", () => {
+  ws.on('close', () => {
     devices.delete(deviceId);
-    console.log("🔴 ESP32 ayrıldı:", deviceId);
+    console.log("Device disconnected:", deviceId);
   });
 });
 
-/* -------------------- OTA ROUTE -------------------- */
-app.post("/ota/:deviceId", upload.single("firmware"), (req, res) => {
+// OTA dosya yükleme
+const upload = multer({ storage: multer.memoryStorage() });
+app.post('/:deviceId/ota.html', upload.single('file'), (req, res) => {
   const ws = devices.get(req.params.deviceId);
-  if (!ws) return res.status(404).send("ESP32 offline");
+  if(!ws) return res.status(404).send("offline");
 
-  ws.send(JSON.stringify({
-    type: "OTA_BEGIN",
-    size: req.file.size
-  }));
+  const fileBuffer = req.file.buffer;
+  ws.send(JSON.stringify({ type:"OTA_BEGIN", size: fileBuffer.length }));
 
-  ws.send(req.file.buffer);
-  ws.send(JSON.stringify({ type: "OTA_END" }));
+  const chunkSize = 1024;
+  for(let i=0; i<fileBuffer.length; i+=chunkSize){
+    const end = Math.min(i+chunkSize, fileBuffer.length);
+    ws.send(fileBuffer.slice(i, end));
+  }
 
-  res.send("OTA gönderildi");
+  ws.send(JSON.stringify({ type:"OTA_END" }));
+  res.send("OTA Başlatıldı");
 });
 
-/* -------------------- START SERVER -------------------- */
-const PORT = process.env.PORT || 3000;
+app.get('/', (req,res)=>{
+  res.sendFile('index.html', { root: './public' });
+});
 
-server.listen(PORT, () => {
-  console.log("🚀 Server çalışıyor PORT:", PORT);
+server.listen(process.env.PORT || 3000, ()=>{
+  console.log("Server running...");
 });
