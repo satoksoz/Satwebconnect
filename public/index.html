@@ -1,51 +1,23 @@
 <!DOCTYPE html>
-<html lang="tr">
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>ESP32 OTA Panel</title>
+<meta charset="UTF-8">
+<title>SatWebConnect Dashboard</title>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
+<h1>SatWebConnect ESP32 Dashboard</h1>
 
-<h2>ESP32 OTA</h2>
+<div id="devices"></div>
 
-<select id="device">
-  <option value="Sat_C812AF453AB4">Sat_C812AF453AB4</option>
-</select>
-
-<br><br>
-
-<input type="file" id="binFile" accept=".bin">
-
-<br><br>
-
+<hr>
+<h2>OTA Yükleme</h2>
+<select id="deviceSelect"></select>
+<input type="file" id="otaFile">
 <button onclick="uploadOTA()">OTA Yükle</button>
 
 <pre id="log"></pre>
 
-<script>
-async function uploadOTA() {
-  const fileInput = document.getElementById("binFile");
-  const device = document.getElementById("device").value;
-  const log = document.getElementById("log");
-
-  if (!fileInput.files.length) {
-    alert("BIN dosyası seç!");
-    return;
-  }
-
-  const formData = new FormData();
-  formData.append("firmware", fileInput.files[0]);
-
-  log.textContent = "Yükleniyor...\n";
-
-  const res = await fetch(`/ota/${device}`, {
-    method: "POST",
-    body: formData
-  });
-
-  log.textContent += await res.text();
-}
-</script>
-
+<script src="main.js"></script>
 </body>
 </html>

@@ -1,54 +1,72 @@
 import express from 'express';
-import http from 'http';
-import { WebSocketServer } from 'ws';
 import multer from 'multer';
+import { WebSocketServer } from 'ws';
+import http from 'http';
+import path from 'path';
 
+const __dirname = path.resolve();
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server, path: '/ws' });
+const wss = new WebSocketServer({ server });
 
-const devices = new Map(); // deviceId => ws
-app.use(express.json());
-app.use(express.static('public')); // dashboard html
+const upload = multer();
+const devices = new Map(); // deviceId -> ws
+
+// Static dosyalar
+app.use(express.static(path.join(__dirname, 'public')));
 
 // WebSocket bağlantısı
 wss.on('connection', (ws, req) => {
-  const urlParams = new URLSearchParams(req.url.replace('/ws?', ''));
-  const deviceId = urlParams.get('deviceId');
-  if(!deviceId) return ws.close();
+  let deviceId = null;
 
-  devices.set(deviceId, ws);
-  console.log("Device connected:", deviceId);
+  ws.on('message', (msg) => {
+    try {
+      const data = JSON.parse(msg.toString());
+      if (data.type === 'REGISTER') {
+        deviceId = data.deviceId;
+        devices.set(deviceId, ws);
+        console.log(`📡 ESP32 Online: ${deviceId}`);
+        ws.send(JSON.stringify({ type: 'REGISTERED', deviceId }));
+      }
+      if (data.type === 'PONG') {
+        // Ping cevabı
+      }
+    } catch(e) {
+      console.log('Mesaj:', msg.toString());
+    }
+  });
 
   ws.on('close', () => {
-    devices.delete(deviceId);
-    console.log("Device disconnected:", deviceId);
+    if(deviceId) {
+      devices.delete(deviceId);
+      console.log(`🔴 ESP32 Offline: ${deviceId}`);
+    }
   });
 });
 
-// OTA dosya yükleme
-const upload = multer({ storage: multer.memoryStorage() });
-app.post('/:deviceId/ota.html', upload.single('file'), (req, res) => {
-  const ws = devices.get(req.params.deviceId);
-  if(!ws) return res.status(404).send("offline");
+// OTA Route
+app.post('/ota/:deviceId', upload.single('file'), async (req, res) => {
+  const deviceId = req.params.deviceId;
+  const ws = devices.get(deviceId);
 
-  const fileBuffer = req.file.buffer;
-  ws.send(JSON.stringify({ type:"OTA_BEGIN", size: fileBuffer.length }));
-
-  const chunkSize = 1024;
-  for(let i=0; i<fileBuffer.length; i+=chunkSize){
-    const end = Math.min(i+chunkSize, fileBuffer.length);
-    ws.send(fileBuffer.slice(i, end));
+  if(!ws || ws.readyState !== ws.OPEN){
+    return res.status(404).send("ESP32 offline");
   }
 
-  ws.send(JSON.stringify({ type:"OTA_END" }));
-  res.send("OTA Başlatıldı");
+  console.log(`OTA Başlıyor: ${deviceId}, boyut: ${req.file.size}`);
+  ws.send(JSON.stringify({ type: "OTA_BEGIN", size: req.file.size }));
+
+  const CHUNK_SIZE = 4096;
+  const data = req.file.buffer;
+
+  for(let i=0; i<data.length; i+=CHUNK_SIZE){
+    const end = Math.min(i+CHUNK_SIZE, data.length);
+    ws.send(data.slice(i, end));
+  }
+
+  ws.send(JSON.stringify({ type: "OTA_END" }));
+  res.send("OTA gönderildi");
 });
 
-app.get('/', (req,res)=>{
-  res.sendFile('index.html', { root: './public' });
-});
-
-server.listen(process.env.PORT || 3000, ()=>{
-  console.log("Server running...");
-});
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => console.log(`Server çalışıyor: http://localhost:${PORT}`));
