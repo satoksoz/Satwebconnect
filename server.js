@@ -1,395 +1,211 @@
 const express = require('express');
-const http = require('http');
-const WebSocket = require('ws');
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
 
 const app = express();
-const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+app.use(express.json());
 
-// Multer için upload klasörü
+// Device storage
+const devices = new Map();
+const pendingRequests = new Map();
+const otaSessions = new Map();
+
+// Multer for file upload
 const upload = multer({ 
     dest: 'uploads/',
-    limits: { fileSize: 2 * 1024 * 1024 } // 2MB limit
+    limits: { fileSize: 2 * 1024 * 1024 }
 });
 
-// Cihaz verileri
-const devices = new Map(); // deviceId -> {ws, info}
-const otaSessions = new Map(); // deviceId -> {filePath, progress}
-
-// WebSocket bağlantısı
-wss.on('connection', (ws, req) => {
-    console.log('🔌 Yeni WebSocket bağlantısı');
-    
-    // Device ID'yi URL'den al
-    const url = new URL(req.url, `http://${req.headers.host}`);
-    const deviceId = url.searchParams.get('deviceId');
+// Register device
+app.post('/api/register', (req, res) => {
+    const { deviceId, ip } = req.body;
     
     if (!deviceId || !deviceId.startsWith('Sat_')) {
-        console.log('❌ Geçersiz Device ID');
-        ws.close(1008, 'Invalid Device ID');
-        return;
+        return res.status(400).json({ error: 'Invalid device ID' });
     }
     
-    console.log(`✅ Cihaz bağlandı: ${deviceId}`);
+    const sessionId = 'sess_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     
-    // Cihazı kaydet
     devices.set(deviceId, {
-        ws: ws,
-        connected: true,
+        sessionId: sessionId,
+        ip: ip,
         lastSeen: Date.now(),
-        ip: req.socket.remoteAddress,
-        deviceId: deviceId
+        queue: []
     });
     
-    // Heartbeat
-    const pingInterval = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-            ws.ping();
-        }
-    }, 30000);
-    
-    // Mesaj işleme
-    ws.on('message', async (data) => {
-        try {
-            const msg = JSON.parse(data.toString());
-            
-            // Cihaz durumunu güncelle
-            const device = devices.get(deviceId);
-            if (device) {
-                device.lastSeen = Date.now();
-            }
-            
-            switch(msg.type) {
-                case 'hello':
-                    console.log(`👋 Hello from ${deviceId}`);
-                    break;
-                    
-                case 'pong':
-                    break;
-                    
-                case 'response':
-                    // HTTP response
-                    handleHTTPResponse(msg);
-                    break;
-                    
-                case 'ota_response':
-                    // OTA response
-                    handleOTAResponse(deviceId, msg);
-                    break;
-            }
-            
-        } catch (err) {
-            console.error('❌ Mesaj parse hatası:', err);
-        }
-    });
-    
-    ws.on('pong', () => {
-        const device = devices.get(deviceId);
-        if (device) device.lastSeen = Date.now();
-    });
-    
-    ws.on('close', () => {
-        console.log(`🔌 Cihaz bağlantısı kapandı: ${deviceId}`);
-        clearInterval(pingInterval);
-        const device = devices.get(deviceId);
-        if (device) device.connected = false;
-    });
+    console.log(`✅ Device registered: ${deviceId}`);
+    res.json({ sessionId: sessionId, status: 'registered' });
 });
 
-// OTA yanıt işleme
-function handleOTAResponse(deviceId, msg) {
-    const session = otaSessions.get(deviceId);
-    if (!session) return;
+// Device polling (Long Polling)
+app.get('/api/poll', (req, res) => {
+    const { deviceId, session } = req.query;
     
     const device = devices.get(deviceId);
-    if (!device || !device.ws) return;
-    
-    switch(msg.status) {
-        case 'ready':
-            // ESP32 OTA'ya hazır, ilk chunk'ı gönder
-            sendOTAChunk(deviceId, session, 0);
-            break;
-            
-        case 'chunk_ok':
-            // Chunk başarıyla alındı, bir sonrakini gönder
-            const nextOffset = msg.next_offset || (session.sent + session.chunkSize);
-            if (nextOffset < session.fileSize) {
-                session.sent = nextOffset;
-                session.progress = Math.round((session.sent / session.fileSize) * 100);
-                sendOTAChunk(deviceId, session, nextOffset);
-            } else {
-                // Tüm dosya gönderildi
-                device.ws.send(JSON.stringify({
-                    type: 'ota_command',
-                    command: 'finalize'
-                }));
-                session.progress = 100;
-            }
-            break;
-            
-        case 'error':
-            console.error(`❌ OTA hatası (${deviceId}):`, msg.error);
-            otaSessions.delete(deviceId);
-            break;
-            
-        case 'success':
-            console.log(`✅ OTA başarılı: ${deviceId}`);
-            otaSessions.delete(deviceId);
-            // Dosyayı temizle
-            if (session.filePath && fs.existsSync(session.filePath)) {
-                fs.unlinkSync(session.filePath);
-            }
-            break;
+    if (!device || device.sessionId !== session) {
+        return res.status(404).json({ error: 'Session expired' });
     }
-}
-
-// OTA chunk gönderme
-function sendOTAChunk(deviceId, session, offset) {
-    const device = devices.get(deviceId);
-    if (!device || !device.ws) return;
     
-    const chunkSize = Math.min(session.chunkSize, session.fileSize - offset);
+    device.lastSeen = Date.now();
     
-    fs.readFile(session.filePath, (err, data) => {
-        if (err) {
-            console.error('❌ Dosya okuma hatası:', err);
-            return;
-        }
-        
-        const chunk = data.slice(offset, offset + chunkSize);
-        const chunkBase64 = chunk.toString('base64');
-        
-        device.ws.send(JSON.stringify({
-            type: 'ota_command',
-            command: 'write',
-            offset: offset,
-            size: chunkSize,
-            data: chunkBase64,
-            total_size: session.fileSize
-        }));
-        
-        console.log(`📤 OTA chunk gönderildi: ${deviceId} - ${offset}/${session.fileSize}`);
-    });
-}
+    // Check if there are pending requests
+    if (device.queue.length > 0) {
+        const request = device.queue.shift();
+        res.json(request);
+    } else {
+        // Long polling: wait for 8 seconds
+        res.setTimeout(8000, () => {
+            res.status(408).json({ status: 'timeout' });
+        });
+    }
+});
 
-// HTTP yanıt işleme
-const pendingRequests = new Map();
-
-function handleHTTPResponse(msg) {
-    const pending = pendingRequests.get(msg.requestId);
+// Handle device response
+app.post('/api/response', (req, res) => {
+    const { requestId, contentType, body } = req.body;
+    
+    const pending = pendingRequests.get(requestId);
     if (pending) {
-        pendingRequests.delete(msg.requestId);
+        pendingRequests.delete(requestId);
         clearTimeout(pending.timeout);
         
-        if (msg.status === 200) {
-            pending.res
-                .status(200)
-                .set('Content-Type', msg.contentType || 'text/html')
-                .send(msg.body);
-        } else {
-            pending.res.status(404).send('Sayfa bulunamadı');
-        }
+        res.set('Content-Type', contentType);
+        res.send(body);
+    } else {
+        res.status(404).json({ error: 'Request not found' });
     }
-}
-
-// Static dosyalar
-app.use(express.static('public'));
+});
 
 // Dashboard
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
-});
-
-// API: Online cihazları listele
-app.get('/api/devices', (req, res) => {
-    const onlineDevices = [];
+    let html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>SAT HTTP Dashboard</title>
+        <style>
+            body { font-family: Arial; padding: 20px; }
+            .device { 
+                border: 1px solid #ccc; 
+                padding: 15px; 
+                margin: 10px 0; 
+                border-radius: 5px;
+                background: #f9f9f9;
+            }
+            .online { border-left: 5px solid green; }
+            .offline { border-left: 5px solid red; }
+            .ota-active { background: #fff3e0; }
+        </style>
+    </head>
+    <body>
+        <h1>📡 SAT HTTP Streaming Dashboard</h1>
+    `;
     
+    let onlineCount = 0;
     devices.forEach((device, deviceId) => {
-        const isOnline = device.connected && (Date.now() - device.lastSeen) < 60000;
+        const isOnline = (Date.now() - device.lastSeen) < 30000; // 30sn
         const otaActive = otaSessions.has(deviceId);
         
-        onlineDevices.push({
-            deviceId,
-            online: isOnline,
-            lastSeen: device.lastSeen,
-            ip: device.ip,
-            otaActive: otaActive,
-            otaProgress: otaActive ? otaSessions.get(deviceId).progress : 0
-        });
+        if (isOnline) onlineCount++;
+        
+        html += `
+        <div class="device ${isOnline ? 'online' : 'offline'} ${otaActive ? 'ota-active' : ''}">
+            <h3>${deviceId}</h3>
+            <p>IP: ${device.ip}</p>
+            <p>Status: ${isOnline ? '🟢 Online' : '🔴 Offline'}</p>
+            ${otaActive ? `<p>⚡ OTA in progress</p>` : ''}
+            <a href="/device/${deviceId}" target="_blank">Access Device</a>
+            <button onclick="startOTA('${deviceId}')">OTA Update</button>
+        </div>`;
     });
     
-    res.json(onlineDevices);
+    html += `<p>Total online: ${onlineCount}</p>`;
+    html += `
+        <script>
+            function startOTA(deviceId) {
+                const fileInput = document.createElement('input');
+                fileInput.type = 'file';
+                fileInput.accept = '.bin';
+                fileInput.onchange = (e) => {
+                    const file = e.target.files[0];
+                    uploadFirmware(deviceId, file);
+                };
+                fileInput.click();
+            }
+            
+            async function uploadFirmware(deviceId, file) {
+                const formData = new FormData();
+                formData.append('firmware', file);
+                formData.append('deviceId', deviceId);
+                
+                const response = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    alert('Firmware uploaded! Starting OTA...');
+                    startOTAUpload(deviceId);
+                }
+            }
+            
+            async function startOTAUpload(deviceId) {
+                const response = await fetch('/api/ota/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ deviceId: deviceId })
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    alert('OTA started! Check device page for progress.');
+                }
+            }
+            
+            // Auto refresh
+            setTimeout(() => location.reload(), 10000);
+        </script>
+    </body>
+    </html>`;
+    
+    res.send(html);
 });
 
-// API: Firmware dosyası yükle
-app.post('/api/upload', upload.single('firmware'), (req, res) => {
-    try {
-        if (!req.file) {
-            return res.status(400).json({ error: 'Dosya seçilmedi' });
-        }
-        
-        const { deviceId } = req.body;
-        if (!deviceId) {
-            fs.unlinkSync(req.file.path);
-            return res.status(400).json({ error: 'Cihaz ID gerekli' });
-        }
-        
-        // Dosya bilgileri
-        const stats = fs.statSync(req.file.path);
-        const fileSize = stats.size;
-        
-        // OTA session oluştur
-        otaSessions.set(deviceId, {
-            filePath: req.file.path,
-            fileSize: fileSize,
-            sent: 0,
-            progress: 0,
-            chunkSize: 4096,
-            startedAt: Date.now()
-        });
-        
-        res.json({
-            success: true,
-            message: 'Firmware yüklendi',
-            filename: req.file.originalname,
-            size: fileSize,
-            deviceId: deviceId
-        });
-        
-    } catch (error) {
-        console.error('❌ Upload hatası:', error);
-        res.status(500).json({ error: 'Upload hatası' });
-    }
-});
-
-// API: OTA başlat
-app.post('/api/ota/start', express.json(), (req, res) => {
-    const { deviceId } = req.body;
-    
-    if (!deviceId) {
-        return res.status(400).json({ error: 'Cihaz ID gerekli' });
-    }
-    
-    const session = otaSessions.get(deviceId);
-    if (!session) {
-        return res.status(404).json({ error: 'OTA session bulunamadı' });
-    }
-    
-    const device = devices.get(deviceId);
-    if (!device || !device.ws || device.ws.readyState !== WebSocket.OPEN) {
-        return res.status(503).json({ error: 'Cihaz çevrimdışı' });
-    }
-    
-    // OTA başlatma komutu
-    device.ws.send(JSON.stringify({
-        type: 'ota_command',
-        command: 'begin',
-        size: session.fileSize,
-        chunk_size: session.chunkSize
-    }));
-    
-    res.json({
-        success: true,
-        message: 'OTA başlatıldı',
-        deviceId: deviceId
-    });
-});
-
-// API: OTA durumu
-app.get('/api/ota/status/:deviceId', (req, res) => {
-    const deviceId = req.params.deviceId;
-    const session = otaSessions.get(deviceId);
-    
-    if (!session) {
-        return res.json({ active: false });
-    }
-    
-    res.json({
-        active: true,
-        progress: session.progress,
-        sent: session.sent,
-        total: session.fileSize,
-        speed: session.fileSize / ((Date.now() - session.startedAt) / 1000)
-    });
-});
-
-// API: OTA iptal
-app.post('/api/ota/cancel', express.json(), (req, res) => {
-    const { deviceId } = req.body;
-    
-    if (!deviceId) {
-        return res.status(400).json({ error: 'Cihaz ID gerekli' });
-    }
-    
-    const session = otaSessions.get(deviceId);
-    if (session) {
-        // Dosyayı sil
-        if (fs.existsSync(session.filePath)) {
-            fs.unlinkSync(session.filePath);
-        }
-        // Session'ı temizle
-        otaSessions.delete(deviceId);
-        
-        // Cihaza iptal mesajı gönder
-        const device = devices.get(deviceId);
-        if (device && device.ws && device.ws.readyState === WebSocket.OPEN) {
-            device.ws.send(JSON.stringify({
-                type: 'ota_command',
-                command: 'cancel'
-            }));
-        }
-    }
-    
-    res.json({ success: true, message: 'OTA iptal edildi' });
-});
-
-// Cihaz HTML proxy
-app.get('/:deviceId/*', async (req, res) => {
+// Device access
+app.get('/device/:deviceId/*', async (req, res) => {
     const deviceId = req.params.deviceId;
     const filePath = req.params[0] || 'index.html';
     
-    console.log(`🌐 ${deviceId} için istek: ${filePath}`);
-    
-    // Cihaz kontrolü
     const device = devices.get(deviceId);
-    const isOnline = device && 
-                    device.connected && 
-                    (Date.now() - device.lastSeen) < 60000;
-    
-    if (!isOnline || !device.ws || device.ws.readyState !== WebSocket.OPEN) {
+    if (!device || (Date.now() - device.lastSeen) > 30000) {
         return res.status(503).send(`
             <html>
-            <body style="font-family: Arial; text-align: center; padding: 50px;">
-                <h1 style="color: #f44336;">🔴 Cihaz Çevrimdışı</h1>
-                <p><strong>${deviceId}</strong> bağlı değil</p>
-                <a href="/" style="color: #2196F3;">← Dashboard'a dön</a>
+            <body style="text-align:center;padding:50px;">
+                <h1>🔴 Device Offline</h1>
+                <p>${deviceId} is not connected</p>
+                <a href="/">Back to Dashboard</a>
             </body>
             </html>
         `);
     }
     
-    // Request ID
-    const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const requestId = 'req_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     
-    // ESP32'ye istek gönder
-    const requestMsg = {
-        type: 'request',
+    // Add request to device queue
+    device.queue.push({
+        type: 'http_request',
         requestId: requestId,
-        method: 'GET',
         path: filePath
-    };
+    });
     
+    // Wait for response
     try {
-        device.ws.send(JSON.stringify(requestMsg));
-        
-        // Yanıt bekle
-        await new Promise((resolve, reject) => {
+        const response = await new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 pendingRequests.delete(requestId);
-                reject(new Error('Zaman aşımı'));
+                reject(new Error('Timeout'));
             }, 10000);
             
             pendingRequests.set(requestId, {
@@ -398,62 +214,98 @@ app.get('/:deviceId/*', async (req, res) => {
                 resolve: resolve
             });
         });
-        
     } catch (error) {
-        console.error(`❌ ${deviceId} zaman aşımı:`, error);
         res.status(504).send(`
             <html>
-            <body style="font-family: Arial; text-align: center; padding: 50px;">
-                <h1 style="color: #ff9800;">⏱️ Zaman Aşımı</h1>
-                <p>Cihaz yanıt vermedi</p>
-                <a href="/" style="color: #2196F3;">← Dashboard'a dön</a>
+            <body style="text-align:center;padding:50px;">
+                <h1>⏱️ Device Timeout</h1>
+                <p>${deviceId} did not respond</p>
+                <a href="/">Back to Dashboard</a>
             </body>
             </html>
         `);
     }
 });
 
-// Ana sayfa yönlendirme
-app.get('/:deviceId', (req, res) => {
-    res.redirect(`/${req.params.deviceId}/index.html`);
+app.get('/device/:deviceId', (req, res) => {
+    res.redirect(`/device/${req.params.deviceId}/index.html`);
 });
 
-// Sağlık kontrolü
-app.get('/health', (req, res) => {
+// File upload for OTA
+app.post('/api/upload', upload.single('firmware'), (req, res) => {
+    const { deviceId } = req.body;
+    
+    if (!req.file) {
+        return res.status(400).json({ error: 'No file' });
+    }
+    
+    const stats = fs.statSync(req.file.path);
+    const fileSize = stats.size;
+    
+    otaSessions.set(deviceId, {
+        filePath: req.file.path,
+        fileSize: fileSize,
+        uploaded: 0,
+        progress: 0,
+        chunkSize: 4096,
+        startedAt: Date.now()
+    });
+    
     res.json({
-        status: 'ok',
-        devices: devices.size,
-        timestamp: new Date().toISOString()
+        success: true,
+        filename: req.file.originalname,
+        size: fileSize
     });
 });
 
-// Temizleyici
+// Start OTA
+app.post('/api/ota/start', async (req, res) => {
+    const { deviceId } = req.body;
+    
+    const device = devices.get(deviceId);
+    const session = otaSessions.get(deviceId);
+    
+    if (!device || !session) {
+        return res.status(404).json({ error: 'Device or OTA session not found' });
+    }
+    
+    // Send OTA start command
+    const requestId = 'ota_start_' + Date.now();
+    device.queue.push({
+        type: 'ota_start',
+        requestId: requestId,
+        size: session.fileSize
+    });
+    
+    res.json({ success: true, message: 'OTA started' });
+});
+
+// Cleanup
 setInterval(() => {
     const now = Date.now();
     
-    // Eski cihazları temizle
+    // Clean old devices
     devices.forEach((device, deviceId) => {
-        if (now - device.lastSeen > 120000) {
-            console.log(`🧹 Eski cihaz temizlendi: ${deviceId}`);
+        if (now - device.lastSeen > 120000) { // 2 minutes
             devices.delete(deviceId);
+            console.log(`🧹 Cleaned device: ${deviceId}`);
         }
     });
     
-    // Eski OTA session'ları temizle
+    // Clean old OTA sessions
     otaSessions.forEach((session, deviceId) => {
-        if (now - session.startedAt > 300000) { // 5 dakika
-            console.log(`🧹 Eski OTA session temizlendi: ${deviceId}`);
+        if (now - session.startedAt > 300000) { // 5 minutes
             if (fs.existsSync(session.filePath)) {
                 fs.unlinkSync(session.filePath);
             }
             otaSessions.delete(deviceId);
+            console.log(`🧹 Cleaned OTA session: ${deviceId}`);
         }
     });
 }, 30000);
 
-// Server başlat
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-    console.log(`🚀 Server ${PORT} portunda çalışıyor`);
+app.listen(PORT, () => {
+    console.log(`🚀 HTTP Streaming Server on port ${PORT}`);
     console.log(`📊 Dashboard: http://localhost:${PORT}`);
 });
