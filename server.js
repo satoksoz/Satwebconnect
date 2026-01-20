@@ -7,6 +7,9 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Serve static files from current directory
+app.use(express.static(__dirname));
+
 // CORS
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
@@ -36,7 +39,7 @@ app.get('/health', (req, res) => {
     });
 });
 
-// Dashboard
+// Main dashboard
 app.get('/', (req, res) => {
     let onlineDevices = 0;
     let html = `
@@ -109,24 +112,113 @@ app.get('/', (req, res) => {
             <p>Last seen: ${new Date(device.lastSeen).toLocaleString()}</p>
             ${otaActive ? `<p>⚡ OTA in progress: ${otaSessions.get(deviceId).progress}%</p>` : ''}
             <div>
-                <a href="/device/${deviceId}" target="_blank" class="btn btn-primary">Access Device</a>
-                ${isOnline ? `<button onclick="startOTA('${deviceId}')" class="btn btn-success">OTA Update</button>` : ''}
+                <a href="/device/${deviceId}" class="btn btn-primary">Access Device</a>
+                ${isOnline ? `<a href="/ota.html?device=${deviceId}" class="btn btn-success">OTA Update</a>` : ''}
             </div>
         </div>`;
     });
     
     html += `
         <p>Online: ${onlineDevices} | Offline: ${devices.size - onlineDevices}</p>
+        <div style="margin-top: 30px;">
+            <a href="/dashboard.html" class="btn btn-primary">Advanced Dashboard</a>
+        </div>
         <script>
-            function startOTA(deviceId) {
-                window.open('/ota.html?device=' + deviceId, '_blank');
-            }
             setTimeout(() => location.reload(), 10000);
         </script>
     </body>
     </html>`;
     
     res.send(html);
+});
+
+// OTA Dashboard
+app.get('/ota.html', (req, res) => {
+    const deviceId = req.query.device;
+    res.sendFile(path.join(__dirname, 'dashboard.html'));
+});
+
+// Device access - root path
+app.get('/device/:deviceId', (req, res) => {
+    const deviceId = req.params.deviceId;
+    const device = devices.get(deviceId);
+    
+    if (!device || (Date.now() - device.lastSeen) > 30000) {
+        return res.status(503).send(`
+            <html><body style="text-align:center;padding:50px;">
+                <h1>Device Offline</h1>
+                <p>The device ${deviceId} is currently offline or not connected.</p>
+                <p>Last seen: ${device ? new Date(device.lastSeen).toLocaleString() : 'Never'}</p>
+                <button onclick="window.history.back()">Go Back</button>
+            </body></html>
+        `);
+    }
+    
+    // Redirect to index.html for the device
+    const requestId = 'req_' + Date.now() + '_' + Math.random().toString(36).substr(2, 8);
+    
+    const command = {
+        type: 'http_request',
+        requestId: requestId,
+        path: '/index.html',
+        method: 'GET',
+        timestamp: new Date().toISOString()
+    };
+    
+    device.queue.push(command);
+    
+    // Create pending request
+    const timeout = setTimeout(() => {
+        pendingRequests.delete(requestId);
+        res.status(504).send('Request timeout');
+    }, 30000);
+    
+    pendingRequests.set(requestId, {
+        timeout: timeout,
+        res: res
+    });
+});
+
+// Device access - any path
+app.get('/device/:deviceId/*', async (req, res) => {
+    const deviceId = req.params.deviceId;
+    const path = req.params[0] || 'index.html';
+    
+    const device = devices.get(deviceId);
+    if (!device || (Date.now() - device.lastSeen) > 30000) {
+        return res.status(503).send(`
+            <html><body style="text-align:center;padding:50px;">
+                <h1>Device Offline</h1>
+                <p>The device ${deviceId} is currently offline or not connected.</p>
+                <p>Last seen: ${device ? new Date(device.lastSeen).toLocaleString() : 'Never'}</p>
+                <button onclick="window.history.back()">Go Back</button>
+            </body></html>
+        `);
+    }
+    
+    // Add HTTP request to device queue
+    const requestId = 'req_' + Date.now() + '_' + Math.random().toString(36).substr(2, 8);
+    
+    const command = {
+        type: 'http_request',
+        requestId: requestId,
+        path: '/' + path,
+        method: 'GET',
+        timestamp: new Date().toISOString()
+    };
+    
+    device.queue.push(command);
+    
+    // Create pending request
+    const timeout = setTimeout(() => {
+        pendingRequests.delete(requestId);
+        res.status(504).send('Request timeout');
+    }, 30000);
+    
+    pendingRequests.set(requestId, {
+        timeout: timeout,
+        res: res
+    });
 });
 
 // Register
@@ -189,48 +281,6 @@ app.post('/api/response', (req, res) => {
     } else {
         res.status(404).json({ error: 'Request not found' });
     }
-});
-
-// Device access
-app.get('/device/:deviceId/*', async (req, res) => {
-    const deviceId = req.params.deviceId;
-    const path = req.params[0] || 'index.html';
-    
-    const device = devices.get(deviceId);
-    if (!device || (Date.now() - device.lastSeen) > 30000) {
-        return res.status(503).send(`
-            <html><body style="text-align:center;padding:50px;">
-                <h1>Device Offline</h1>
-                <p>The device ${deviceId} is currently offline or not connected.</p>
-                <p>Last seen: ${device ? new Date(device.lastSeen).toLocaleString() : 'Never'}</p>
-                <button onclick="window.history.back()">Go Back</button>
-            </body></html>
-        `);
-    }
-    
-    // Add HTTP request to device queue
-    const requestId = 'req_' + Date.now() + '_' + Math.random().toString(36).substr(2, 8);
-    
-    const command = {
-        type: 'http_request',
-        requestId: requestId,
-        path: path,
-        method: 'GET',
-        timestamp: new Date().toISOString()
-    };
-    
-    device.queue.push(command);
-    
-    // Create pending request
-    const timeout = setTimeout(() => {
-        pendingRequests.delete(requestId);
-        res.status(504).send('Request timeout');
-    }, 30000);
-    
-    pendingRequests.set(requestId, {
-        timeout: timeout,
-        res: res
-    });
 });
 
 // API endpoints for dashboard
@@ -371,16 +421,6 @@ app.post('/api/ota/cancel', (req, res) => {
     }
     
     res.json({ success: true });
-});
-
-// Serve dashboard.html
-app.get('/dashboard.html', (req, res) => {
-    res.sendFile(path.join(__dirname, 'dashboard.html'));
-});
-
-// Serve style.css
-app.get('/style.css', (req, res) => {
-    res.sendFile(path.join(__dirname, 'style.css'));
 });
 
 // Start server
