@@ -200,4 +200,196 @@ app.get('/device/:deviceId/*', async (req, res) => {
     if (!device || (Date.now() - device.lastSeen) > 30000) {
         return res.status(503).send(`
             <html><body style="text-align:center;padding:50px;">
-                <h1>
+                <h1>Device Offline</h1>
+                <p>The device ${deviceId} is currently offline or not connected.</p>
+                <p>Last seen: ${device ? new Date(device.lastSeen).toLocaleString() : 'Never'}</p>
+                <button onclick="window.history.back()">Go Back</button>
+            </body></html>
+        `);
+    }
+    
+    // Add HTTP request to device queue
+    const requestId = 'req_' + Date.now() + '_' + Math.random().toString(36).substr(2, 8);
+    
+    const command = {
+        type: 'http_request',
+        requestId: requestId,
+        path: path,
+        method: 'GET',
+        timestamp: new Date().toISOString()
+    };
+    
+    device.queue.push(command);
+    
+    // Create pending request
+    const timeout = setTimeout(() => {
+        pendingRequests.delete(requestId);
+        res.status(504).send('Request timeout');
+    }, 30000);
+    
+    pendingRequests.set(requestId, {
+        timeout: timeout,
+        res: res
+    });
+});
+
+// API endpoints for dashboard
+app.get('/api/devices', (req, res) => {
+    const deviceList = [];
+    
+    devices.forEach((device, deviceId) => {
+        const isOnline = (Date.now() - device.lastSeen) < 30000;
+        const otaActive = otaSessions.has(deviceId);
+        
+        deviceList.push({
+            deviceId: deviceId,
+            ip: device.ip,
+            lastSeen: device.lastSeen,
+            online: isOnline,
+            otaActive: otaActive,
+            otaProgress: otaActive ? otaSessions.get(deviceId).progress : 0
+        });
+    });
+    
+    res.json(deviceList);
+});
+
+// File upload for OTA
+app.post('/api/upload', upload.single('firmware'), (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ error: 'No file uploaded' });
+    }
+    
+    const { deviceId } = req.body;
+    
+    if (!deviceId) {
+        return res.status(400).json({ error: 'Device ID required' });
+    }
+    
+    const device = devices.get(deviceId);
+    if (!device) {
+        return res.status(404).json({ error: 'Device not found' });
+    }
+    
+    // Store file info for OTA
+    otaSessions.set(deviceId, {
+        filePath: req.file.path,
+        fileName: req.file.originalname,
+        fileSize: req.file.size,
+        progress: 0,
+        startTime: Date.now(),
+        bytesSent: 0
+    });
+    
+    res.json({
+        success: true,
+        fileName: req.file.originalname,
+        fileSize: req.file.size
+    });
+});
+
+// Start OTA
+app.post('/api/ota/start', (req, res) => {
+    const { deviceId } = req.body;
+    
+    if (!deviceId) {
+        return res.status(400).json({ error: 'Device ID required' });
+    }
+    
+    const device = devices.get(deviceId);
+    if (!device) {
+        return res.status(404).json({ error: 'Device not found' });
+    }
+    
+    const otaSession = otaSessions.get(deviceId);
+    if (!otaSession) {
+        return res.status(400).json({ error: 'No firmware uploaded for this device' });
+    }
+    
+    // Create OTA start command
+    const requestId = 'ota_' + Date.now() + '_' + Math.random().toString(36).substr(2, 8);
+    
+    const command = {
+        type: 'ota_start',
+        requestId: requestId,
+        size: otaSession.fileSize,
+        fileName: otaSession.fileName
+    };
+    
+    device.queue.push(command);
+    
+    // Reset progress
+    otaSession.progress = 0;
+    otaSession.bytesSent = 0;
+    
+    res.json({
+        success: true,
+        requestId: requestId,
+        size: otaSession.fileSize
+    });
+});
+
+// OTA status
+app.get('/api/ota/status/:deviceId', (req, res) => {
+    const { deviceId } = req.params;
+    const otaSession = otaSessions.get(deviceId);
+    
+    if (!otaSession) {
+        return res.json({
+            active: false,
+            progress: 0
+        });
+    }
+    
+    // Calculate speed
+    const elapsed = (Date.now() - otaSession.startTime) / 1000;
+    const speed = elapsed > 0 ? otaSession.bytesSent / elapsed : 0;
+    
+    res.json({
+        active: true,
+        progress: otaSession.progress,
+        sent: otaSession.bytesSent,
+        total: otaSession.fileSize,
+        speed: Math.round(speed),
+        fileName: otaSession.fileName
+    });
+});
+
+// Cancel OTA
+app.post('/api/ota/cancel', (req, res) => {
+    const { deviceId } = req.body;
+    
+    if (deviceId && otaSessions.has(deviceId)) {
+        const session = otaSessions.get(deviceId);
+        
+        // Clean up file
+        if (session.filePath && fs.existsSync(session.filePath)) {
+            fs.unlinkSync(session.filePath);
+        }
+        
+        otaSessions.delete(deviceId);
+    }
+    
+    res.json({ success: true });
+});
+
+// Serve dashboard.html
+app.get('/dashboard.html', (req, res) => {
+    res.sendFile(path.join(__dirname, 'dashboard.html'));
+});
+
+// Serve style.css
+app.get('/style.css', (req, res) => {
+    res.sendFile(path.join(__dirname, 'style.css'));
+});
+
+// Start server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+    
+    // Create uploads directory if it doesn't exist
+    if (!fs.existsSync('uploads')) {
+        fs.mkdirSync('uploads');
+    }
+});
