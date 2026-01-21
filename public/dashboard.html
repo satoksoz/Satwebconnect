@@ -35,7 +35,10 @@
             border-radius: 10px; 
             text-align: center;
             min-width: 150px;
+            cursor: pointer;
         }
+        
+        .stat:hover { transform: translateY(-2px); transition: transform 0.3s; }
         
         .stat-num { font-size: 36px; font-weight: bold; }
         .stat-label { font-size: 14px; opacity: 0.9; }
@@ -64,6 +67,8 @@
         }
         
         .device-card:hover { transform: translateY(-5px); }
+        
+        .device-card.ota-active { border-left-color: #FF9800; }
         
         .device-header { 
             display: flex; 
@@ -98,6 +103,23 @@
             color: white;
         }
         
+        .status.ota { background: #FF9800; }
+        
+        .ota-progress {
+            margin: 10px 0;
+            background: #e0e0e0;
+            border-radius: 10px;
+            height: 10px;
+            overflow: hidden;
+        }
+        
+        .ota-progress-fill {
+            height: 100%;
+            background: #FF9800;
+            width: 0%;
+            transition: width 0.3s;
+        }
+        
         .actions { 
             display: flex; 
             gap: 10px; 
@@ -122,6 +144,8 @@
         .btn-ota { background: #FF9800; }
         
         .btn:hover { opacity: 0.9; }
+        
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
         
         .refresh-btn { 
             position: fixed; 
@@ -219,6 +243,10 @@
             background: #FFF3E0;
         }
         
+        .file-input:hover {
+            background: #FFECB3;
+        }
+        
         .modal-btn {
             width: 100%;
             padding: 15px;
@@ -231,6 +259,38 @@
             font-weight: bold;
             margin-top: 10px;
         }
+        
+        .modal-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .progress-container {
+            display: none;
+            margin: 20px 0;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #e0e0e0;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: #4CAF50;
+            width: 0%;
+            transition: width 0.3s;
+        }
+        
+        .progress-text {
+            text-align: center;
+            font-weight: bold;
+            color: #333;
+        }
     </style>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
@@ -241,9 +301,13 @@
             <p>Sadece çevrimiçi cihazlar gösteriliyor</p>
             
             <div class="stats">
-                <div class="stat">
+                <div class="stat" onclick="loadDevices()">
                     <div class="stat-num" id="online-count">0</div>
                     <div class="stat-label">ÇEVRİMİÇİ CİHAZ</div>
+                </div>
+                <div class="stat" onclick="checkOTAJobs()">
+                    <div class="stat-num" id="ota-count">0</div>
+                    <div class="stat-label">AKTİF OTA</div>
                 </div>
             </div>
             
@@ -284,15 +348,35 @@
             <p><strong>Cihaz:</strong> <span id="otaDeviceName">-</span></p>
             <p><strong>ID:</strong> <span id="otaDeviceId">-</span></p>
             
-            <div class="file-input" onclick="document.getElementById('otaFile').click()">
+            <div class="file-input" onclick="document.getElementById('otaFile').click()" id="fileDropArea">
                 <i class="fas fa-cloud-upload-alt fa-2x"></i>
                 <p style="margin: 10px 0;">Firmware dosyası seç</p>
                 <p style="font-size: 12px; color: #666;">.bin uzantılı dosyalar</p>
+                <input type="file" id="otaFile" accept=".bin" style="display: none;">
             </div>
-            <input type="file" id="otaFile" accept=".bin" style="display: none;">
             
-            <button class="modal-btn" onclick="startOTA()">
+            <div id="fileInfo" style="display: none; background: #E8F5E9; padding: 15px; border-radius: 10px; margin: 10px 0;">
+                <p><strong>✓ Dosya seçildi:</strong> <span id="fileName">-</span></p>
+                <p><strong>Boyut:</strong> <span id="fileSize">-</span></p>
+            </div>
+            
+            <div class="progress-container" id="progressContainer">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <div class="progress-text" id="progressText">%0</div>
+            </div>
+            
+            <button class="modal-btn" onclick="uploadFirmware()" id="uploadBtn" disabled>
+                <i class="fas fa-upload"></i> Dosyayı Yükle
+            </button>
+            
+            <button class="modal-btn" onclick="startOTA()" id="startBtn" style="display: none; background: #4CAF50;">
                 <i class="fas fa-play"></i> OTA Başlat
+            </button>
+            
+            <button class="modal-btn" onclick="closeOTA()" style="background: #f44336; margin-top: 10px;">
+                <i class="fas fa-times"></i> İptal
             </button>
         </div>
     </div>
@@ -300,20 +384,20 @@
     <script>
         let devices = [];
         let selectedDevice = null;
+        let selectedFile = null;
+        let otaCheckInterval = null;
         
         // Sayfa yüklendiğinde çalıştır
         document.addEventListener('DOMContentLoaded', function() {
             console.log('🚀 Dashboard yüklendi');
             loadDevices(); // Sayfa açılır açılmaz yükle
             
-            // Her 10 saniyede bir otomatik yenile
-            setInterval(loadDevices, 10000);
+            // Her 5 saniyede bir otomatik yenile
+            setInterval(loadDevices, 5000);
         });
         
         // Cihazları yükle
         async function loadDevices() {
-            console.log('📡 Cihazlar yükleniyor...');
-            
             try {
                 const response = await fetch('/api/devices');
                 if (!response.ok) {
@@ -333,13 +417,22 @@
                 
             } catch (error) {
                 console.error('❌ Cihazlar yüklenemedi:', error);
-                showError('Cihazlar yüklenemedi: ' + error.message);
             }
+        }
+        
+        // OTA job'larını kontrol et
+        function checkOTAJobs() {
+            let activeOTA = 0;
+            devices.forEach(device => {
+                if (device.otaActive) activeOTA++;
+            });
+            document.getElementById('ota-count').textContent = activeOTA;
         }
         
         // İstatistikleri güncelle
         function updateStats() {
             document.getElementById('online-count').textContent = devices.length;
+            checkOTAJobs();
             document.title = `(${devices.length}) ESP32 Dashboard`;
         }
         
@@ -365,17 +458,28 @@
             
             devices.forEach(device => {
                 const lastSeenSeconds = device.lastSeenAgo || 0;
+                const isOTAActive = device.otaActive || false;
+                const otaProgress = device.otaProgress || 0;
                 
                 html += `
-                    <div class="device-card">
+                    <div class="device-card ${isOTAActive ? 'ota-active' : ''}">
                         <div class="device-header">
                             <div class="device-name">${device.name}</div>
-                            <div class="status">
-                                <i class="fas fa-circle"></i> ÇEVRİMİÇİ
+                            <div class="status ${isOTAActive ? 'ota' : ''}">
+                                ${isOTAActive ? '⚡ OTA' : '🟢 ÇEVRİMİÇİ'}
                             </div>
                         </div>
                         
                         <div class="device-id">${device.id}</div>
+                        
+                        ${isOTAActive ? `
+                            <div class="ota-progress">
+                                <div class="ota-progress-fill" style="width: ${otaProgress}%"></div>
+                            </div>
+                            <div style="font-size: 12px; color: #FF9800; text-align: center;">
+                                <i class="fas fa-sync-alt fa-spin"></i> OTA: %${otaProgress}
+                            </div>
+                        ` : ''}
                         
                         <div class="last-seen">
                             <i class="fas fa-clock"></i> ${lastSeenSeconds} saniye önce görüldü
@@ -385,8 +489,8 @@
                             <button class="btn btn-html" onclick="openHTML('${device.id}')">
                                 <i class="fas fa-globe"></i> HTML
                             </button>
-                            <button class="btn btn-ota" onclick="openOTA('${device.id}', '${device.name}')">
-                                <i class="fas fa-upload"></i> OTA
+                            <button class="btn btn-ota" onclick="openOTA('${device.id}', '${device.name}')" ${isOTAActive ? 'disabled' : ''}>
+                                ${isOTAActive ? '<i class="fas fa-sync-alt fa-spin"></i> OTA DEVAM' : '<i class="fas fa-upload"></i> OTA'}
                             </button>
                         </div>
                     </div>
@@ -397,21 +501,6 @@
             container.innerHTML = html;
         }
         
-        // Hata göster
-        function showError(message) {
-            const container = document.getElementById('devices');
-            container.innerHTML = `
-                <div class="empty-state" style="color: #f44336;">
-                    <i class="fas fa-exclamation-triangle"></i>
-                    <h3>Hata</h3>
-                    <p>${message}</p>
-                    <button onclick="loadDevices()" style="margin-top: 20px; padding: 10px 20px; background: #f44336; color: white; border: none; border-radius: 5px; cursor: pointer;">
-                        <i class="fas fa-redo"></i> Tekrar Dene
-                    </button>
-                </div>
-            `;
-        }
-        
         // HTML aç - CİHAZ DETAY SAYFASI
         function openHTML(deviceId) {
             window.open(`/device/${deviceId}`, '_blank');
@@ -420,9 +509,20 @@
         // OTA aç
         function openOTA(deviceId, deviceName) {
             selectedDevice = deviceId;
+            selectedFile = null;
+            
             document.getElementById('otaDeviceName').textContent = deviceName;
             document.getElementById('otaDeviceId').textContent = deviceId;
+            document.getElementById('fileInfo').style.display = 'none';
+            document.getElementById('uploadBtn').disabled = true;
+            document.getElementById('startBtn').style.display = 'none';
+            document.getElementById('progressContainer').style.display = 'none';
+            document.getElementById('otaFile').value = '';
+            
             document.getElementById('otaModal').style.display = 'flex';
+            
+            // OTA durumunu kontrol et
+            checkOTAStatus();
         }
         
         // OTA kapat
@@ -430,22 +530,106 @@
             document.getElementById('otaModal').style.display = 'none';
             document.getElementById('otaFile').value = '';
             selectedDevice = null;
+            selectedFile = null;
+            
+            if (otaCheckInterval) {
+                clearInterval(otaCheckInterval);
+                otaCheckInterval = null;
+            }
         }
         
-        // OTA başlat - DÜZELTİLDİ
+        // Dosya seçildiğinde
+        document.getElementById('otaFile').addEventListener('change', function(e) {
+            if (e.target.files.length > 0) {
+                selectedFile = e.target.files[0];
+                
+                // Dosya uzantısı kontrolü
+                if (!selectedFile.name.toLowerCase().endsWith('.bin')) {
+                    alert('Sadece .bin uzantılı dosyalar yüklenebilir!');
+                    selectedFile = null;
+                    e.target.value = '';
+                    return;
+                }
+                
+                // Dosya boyutu kontrolü (max 2MB)
+                if (selectedFile.size > 2 * 1024 * 1024) {
+                    alert('Dosya boyutu 2MB\'dan küçük olmalıdır!');
+                    selectedFile = null;
+                    e.target.value = '';
+                    return;
+                }
+                
+                // Dosya bilgilerini göster
+                document.getElementById('fileName').textContent = selectedFile.name;
+                document.getElementById('fileSize').textContent = formatBytes(selectedFile.size);
+                document.getElementById('fileInfo').style.display = 'block';
+                document.getElementById('uploadBtn').disabled = false;
+            }
+        });
+        
+        // Dosya boyutunu formatla
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+        
+        // Firmware dosyasını yükle
+        async function uploadFirmware() {
+            if (!selectedDevice || !selectedFile) {
+                alert('Cihaz ve dosya seçin!');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('firmware', selectedFile);
+            formData.append('deviceId', selectedDevice);
+            
+            try {
+                document.getElementById('uploadBtn').disabled = true;
+                document.getElementById('uploadBtn').innerHTML = '<i class="fas fa-spinner fa-spin"></i> Yükleniyor...';
+                
+                const response = await fetch('/api/ota/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    alert('✅ Firmware dosyası yüklendi!');
+                    document.getElementById('uploadBtn').style.display = 'none';
+                    document.getElementById('startBtn').style.display = 'block';
+                    
+                    // OTA durumunu kontrol et
+                    checkOTAStatus();
+                } else {
+                    alert('❌ Dosya yüklenemedi: ' + (result.error || 'Bilinmeyen hata'));
+                    document.getElementById('uploadBtn').disabled = false;
+                    document.getElementById('uploadBtn').innerHTML = '<i class="fas fa-upload"></i> Dosyayı Yükle';
+                }
+                
+            } catch (error) {
+                console.error('Upload hatası:', error);
+                alert('❌ Hata: ' + error.message);
+                document.getElementById('uploadBtn').disabled = false;
+                document.getElementById('uploadBtn').innerHTML = '<i class="fas fa-upload"></i> Dosyayı Yükle';
+            }
+        }
+        
+        // OTA başlat
         async function startOTA() {
             if (!selectedDevice) {
                 alert('Cihaz seçilmedi!');
                 return;
             }
-
-            const fileInput = document.getElementById('otaFile');
-            if (!fileInput.files[0]) {
-                alert('Lütfen firmware dosyası seçin!');
-                return;
-            }
-
+            
             try {
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('startBtn').innerHTML = '<i class="fas fa-spinner fa-spin"></i> Başlatılıyor...';
+                
                 const response = await fetch('/api/ota/start', {
                     method: 'POST',
                     headers: { 
@@ -455,28 +639,82 @@
                         deviceId: selectedDevice 
                     })
                 });
-
-                const contentType = response.headers.get("content-type");
                 
-                if (!contentType || !contentType.includes("application/json")) {
-                    const text = await response.text();
-                    console.error('JSON olmayan response:', text);
-                    throw new Error('Server JSON dönmedi');
-                }
-
                 const result = await response.json();
                 
                 if (result.success) {
                     alert('✅ OTA güncellemesi başlatıldı!');
-                    closeOTA();
+                    document.getElementById('progressContainer').style.display = 'block';
+                    
+                    // OTA progress'ini takip et
+                    startOTAProgress();
                 } else {
                     alert('❌ OTA başlatılamadı: ' + (result.error || 'Bilinmeyen hata'));
+                    document.getElementById('startBtn').disabled = false;
+                    document.getElementById('startBtn').innerHTML = '<i class="fas fa-play"></i> OTA Başlat';
                 }
-
+                
             } catch (error) {
                 console.error('OTA hatası:', error);
                 alert('❌ Hata: ' + error.message);
+                document.getElementById('startBtn').disabled = false;
+                document.getElementById('startBtn').innerHTML = '<i class="fas fa-play"></i> OTA Başlat';
             }
+        }
+        
+        // OTA durumunu kontrol et
+        async function checkOTAStatus() {
+            if (!selectedDevice) return;
+            
+            try {
+                const response = await fetch(`/api/ota/status/${selectedDevice}`);
+                const status = await response.json();
+                
+                if (status.hasFile) {
+                    document.getElementById('startBtn').style.display = 'block';
+                    document.getElementById('uploadBtn').style.display = 'none';
+                }
+            } catch (error) {
+                console.error('OTA status hatası:', error);
+            }
+        }
+        
+        // OTA progress'ini takip et
+        function startOTAProgress() {
+            let progress = 0;
+            
+            otaCheckInterval = setInterval(async () => {
+                try {
+                    const response = await fetch(`/api/ota/status/${selectedDevice}`);
+                    const status = await response.json();
+                    
+                    if (status.active) {
+                        progress = status.progress;
+                        document.getElementById('progressFill').style.width = progress + '%';
+                        document.getElementById('progressText').textContent = '%' + progress;
+                        
+                        // OTA tamamlandıysa
+                        if (progress >= 100) {
+                            clearInterval(otaCheckInterval);
+                            setTimeout(() => {
+                                alert('🎉 OTA güncellemesi tamamlandı!');
+                                closeOTA();
+                                loadDevices();
+                            }, 1000);
+                        }
+                    } else if (progress > 0) {
+                        // OTA tamamlandı
+                        clearInterval(otaCheckInterval);
+                        setTimeout(() => {
+                            alert('🎉 OTA güncellemesi tamamlandı!');
+                            closeOTA();
+                            loadDevices();
+                        }, 1000);
+                    }
+                } catch (error) {
+                    console.error('Progress takip hatası:', error);
+                }
+            }, 1000);
         }
         
         // ESC tuşu ile modal kapatma
@@ -490,6 +728,28 @@
         document.getElementById('otaModal').addEventListener('click', function(event) {
             if (event.target === this) {
                 closeOTA();
+            }
+        });
+        
+        // Drag & drop için
+        const fileDropArea = document.getElementById('fileDropArea');
+        
+        fileDropArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            fileDropArea.style.background = '#FFECB3';
+        });
+        
+        fileDropArea.addEventListener('dragleave', () => {
+            fileDropArea.style.background = '#FFF3E0';
+        });
+        
+        fileDropArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            fileDropArea.style.background = '#FFF3E0';
+            
+            if (e.dataTransfer.files.length > 0) {
+                document.getElementById('otaFile').files = e.dataTransfer.files;
+                document.getElementById('otaFile').dispatchEvent(new Event('change'));
             }
         });
     </script>
