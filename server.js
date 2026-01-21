@@ -445,7 +445,7 @@ app.get('/api/devices', (req, res) => {
     
     devices.forEach((device, deviceId) => {
         const isOnline = (Date.now() - device.lastSeen) < 30000;
-        const otaActive = otaSessions.has(deviceId);
+        const otaActive = otaSessions.has(deviceId) && otaSessions.get(deviceId).active;
         
         deviceList.push({
             deviceId: deviceId,
@@ -486,7 +486,12 @@ app.post('/api/upload', upload.single('firmware'), (req, res) => {
         fileSize: req.file.size,
         progress: 0,
         startTime: Date.now(),
-        bytesSent: 0
+        bytesSent: 0,
+        active: false,
+        firmwareData: null,
+        chunkSize: 4096,
+        currentOffset: 0,
+        requestId: null
     });
     
     res.json({
@@ -496,6 +501,81 @@ app.post('/api/upload', upload.single('firmware'), (req, res) => {
     });
 });
 
+// ============ OTA CHUNK ENDPOINT ============
+app.post('/api/ota/chunk', (req, res) => {
+    const { deviceId, requestId, offset, size, data } = req.body;
+    
+    console.log(`OTA chunk received for ${deviceId}, offset: ${offset}, size: ${size}`);
+    
+    if (!deviceId || !requestId) {
+        return res.status(400).json({ error: 'Missing parameters' });
+    }
+    
+    const device = devices.get(deviceId);
+    if (!device) {
+        return res.status(404).json({ error: 'Device not found' });
+    }
+    
+    const otaSession = otaSessions.get(deviceId);
+    if (!otaSession) {
+        return res.status(400).json({ error: 'No active OTA session' });
+    }
+    
+    // Cihaza chunk gönder
+    const command = {
+        type: 'ota_chunk',
+        requestId: requestId,
+        offset: offset,
+        size: size,
+        data: data // base64 encoded
+    };
+    
+    device.queue.push(command);
+    
+    // Progress güncelle
+    otaSession.bytesSent += size;
+    otaSession.progress = Math.round((otaSession.bytesSent / otaSession.fileSize) * 100);
+    
+    res.json({
+        success: true,
+        nextOffset: offset + size,
+        bytesSent: otaSession.bytesSent,
+        progress: otaSession.progress
+    });
+});
+
+// ============ OTA FINALIZE ============
+app.post('/api/ota/finalize', (req, res) => {
+    const { deviceId, requestId } = req.body;
+    
+    if (!deviceId || !requestId) {
+        return res.status(400).json({ error: 'Missing parameters' });
+    }
+    
+    const device = devices.get(deviceId);
+    if (!device) {
+        return res.status(404).json({ error: 'Device not found' });
+    }
+    
+    const otaSession = otaSessions.get(deviceId);
+    if (!otaSession || !otaSession.active) {
+        return res.status(400).json({ error: 'No active OTA session' });
+    }
+    
+    const command = {
+        type: 'ota_finalize',
+        requestId: requestId
+    };
+    
+    device.queue.push(command);
+    
+    // Cleanup
+    otaSessions.delete(deviceId);
+    
+    res.json({ success: true });
+});
+
+// ============ ENHANCED OTA START ============
 app.post('/api/ota/start', (req, res) => {
     const { deviceId } = req.body;
     
@@ -515,22 +595,40 @@ app.post('/api/ota/start', (req, res) => {
     
     const requestId = 'ota_' + Date.now() + '_' + Math.random().toString(36).substr(2, 8);
     
+    // Firmware dosyasını oku ve base64'e çevir
+    try {
+        const firmwareData = fs.readFileSync(otaSession.filePath);
+        otaSession.firmwareData = firmwareData.toString('base64');
+        otaSession.chunkSize = 1024; // 1KB chunks - ESP32 için daha güvenli
+        otaSession.currentOffset = 0;
+    } catch (error) {
+        console.error('Failed to read firmware file:', error);
+        return res.status(500).json({ error: 'Failed to read firmware file' });
+    }
+    
     const command = {
         type: 'ota_start',
         requestId: requestId,
         size: otaSession.fileSize,
-        fileName: otaSession.fileName
+        fileName: otaSession.fileName,
+        chunkSize: otaSession.chunkSize
     };
     
     device.queue.push(command);
     
+    // OTA session'ı güncelle
+    otaSession.requestId = requestId;
     otaSession.progress = 0;
     otaSession.bytesSent = 0;
+    otaSession.startTime = Date.now();
+    otaSession.active = true;
     
     res.json({
         success: true,
         requestId: requestId,
-        size: otaSession.fileSize
+        size: otaSession.fileSize,
+        chunkSize: otaSession.chunkSize,
+        totalChunks: Math.ceil(otaSession.fileSize / otaSession.chunkSize)
     });
 });
 
@@ -538,19 +636,29 @@ app.get('/api/ota/status/:deviceId', (req, res) => {
     const { deviceId } = req.params;
     const otaSession = otaSessions.get(deviceId);
     
-    if (!otaSession) {
+    if (!otaSession || !otaSession.active) {
         return res.json({
             active: false,
             progress: 0
         });
     }
     
+    // Hız hesapla
+    const elapsed = (Date.now() - otaSession.startTime) / 1000; // saniye
+    const speed = elapsed > 0 ? otaSession.bytesSent / elapsed : 0;
+    
+    // Kalan süreyi hesapla
+    const remainingBytes = otaSession.fileSize - otaSession.bytesSent;
+    const eta = speed > 0 ? remainingBytes / speed : 0;
+    
     res.json({
         active: true,
         progress: otaSession.progress,
         sent: otaSession.bytesSent,
         total: otaSession.fileSize,
-        fileName: otaSession.fileName
+        fileName: otaSession.fileName,
+        speed: Math.round(speed),
+        eta: Math.round(eta)
     });
 });
 
@@ -560,10 +668,22 @@ app.post('/api/ota/cancel', (req, res) => {
     if (deviceId && otaSessions.has(deviceId)) {
         const session = otaSessions.get(deviceId);
         
+        // Dosyayı sil
         if (session.filePath && fs.existsSync(session.filePath)) {
             fs.unlinkSync(session.filePath);
         }
         
+        // Device'e cancel komutu gönder
+        const device = devices.get(deviceId);
+        if (device && session.requestId) {
+            const command = {
+                type: 'ota_cancel',
+                requestId: session.requestId
+            };
+            device.queue.push(command);
+        }
+        
+        // Session'ı temizle
         otaSessions.delete(deviceId);
     }
     
@@ -595,6 +715,8 @@ app.use((req, res) => {
             'POST /api/response',
             'POST /api/upload',
             'POST /api/ota/start',
+            'POST /api/ota/chunk',
+            'POST /api/ota/finalize',
             'GET /api/ota/status/:id',
             'POST /api/ota/cancel'
         ]
@@ -628,6 +750,8 @@ app.listen(PORT, () => {
     console.log('  POST /api/response        - Response from device');
     console.log('  POST /api/upload          - Upload firmware');
     console.log('  POST /api/ota/start       - Start OTA');
+    console.log('  POST /api/ota/chunk       - Send OTA chunk');
+    console.log('  POST /api/ota/finalize    - Finalize OTA');
     console.log('  GET  /api/ota/status/:id  - OTA status');
     console.log('  POST /api/ota/cancel      - Cancel OTA');
 });
