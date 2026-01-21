@@ -11,12 +11,12 @@ const devices = new Map();
 
 // Middleware
 app.use(express.json());
-app.use(express.static('public'));
+app.use(express.static('public'));  // public klasörünü statik dosyalar için kullan
 app.use(express.urlencoded({ extended: true }));
 
-// Dashboard sayfası
+// Dashboard sayfası - public/dashboard.html dosyasını sun
 app.get('/dashboard', (req, res) => {
-    res.sendFile(path.join(__dirname, 'dashboard.html'));
+    res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
 });
 
 // Ana sayfa
@@ -101,7 +101,7 @@ app.get('/api/device/:deviceId', (req, res) => {
     });
 });
 
-// API: Cihaz kaydı - SENİN ORJİNAL KODUN
+// API: Cihaz kaydı
 app.post('/api/register', (req, res) => {
     console.log('\n=== REGISTER REQUEST ===');
     console.log('Headers:', req.headers);
@@ -242,7 +242,7 @@ app.post('/api/ota/chunk', (req, res) => {
     }
     
     // Progress'i güncelle (simülasyon)
-    const newProgress = Math.min(100, Math.floor((offset + size) / 1024)); // Örnek hesaplama
+    const newProgress = Math.min(100, Math.floor((offset + size) / 1024));
     
     device.otaProgress = newProgress;
     devices.set(deviceId, device);
@@ -271,6 +271,25 @@ app.post('/api/ota/finalize', (req, res) => {
     res.json({
         success: true,
         message: 'OTA completed'
+    });
+});
+
+// API: OTA iptal
+app.post('/api/ota/cancel', (req, res) => {
+    const { deviceId } = req.body;
+    
+    const device = devices.get(deviceId);
+    if (!device) {
+        return res.status(404).json({ error: 'Device not found' });
+    }
+    
+    device.otaActive = false;
+    device.otaProgress = 0;
+    devices.set(deviceId, device);
+    
+    res.json({
+        success: true,
+        message: 'OTA cancelled'
     });
 });
 
@@ -346,6 +365,7 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`✅ Server running on port ${PORT}`);
+    console.log(`🏠 Home: http://localhost:${PORT}`);
     console.log(`📊 Dashboard: http://localhost:${PORT}/dashboard`);
     console.log(`📡 API Base: http://localhost:${PORT}/api`);
     console.log(`❤️  Health: http://localhost:${PORT}/health`);
