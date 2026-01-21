@@ -5,22 +5,41 @@ const path = require('path');
 
 const app = express();
 
-// Body parser
-app.use(express.json({ limit: '10mb' }));
+// Body parser - TÜM endpoint'ler için
+app.use(express.json({ 
+    limit: '10mb',
+    verify: (req, res, buf) => {
+        req.rawBody = buf.toString();
+    }
+}));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Tüm request'leri logla
+app.use((req, res, next) => {
+    console.log(`\n[${new Date().toISOString()}] ${req.method} ${req.url}`);
+    next();
+});
 
 // CORS
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Headers', '*');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
     res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
+    
     next();
 });
 
 // File upload
 const upload = multer({ 
     dest: 'uploads/',
-    limits: { fileSize: 2 * 1024 * 1024 }
+    limits: { 
+        fileSize: 2 * 1024 * 1024,
+        files: 1
+    }
 });
 
 // Storage
@@ -28,18 +47,66 @@ const devices = new Map();
 const pendingRequests = new Map();
 const otaSessions = new Map();
 
-// Health check
+// ============ STATIC FILES ============
+app.use(express.static(__dirname));
+
+// ============ HEALTH CHECK ============
 app.get('/health', (req, res) => {
+    console.log('Health check requested');
     res.json({
         status: 'ok',
         devices: devices.size,
+        pendingRequests: pendingRequests.size,
         otaSessions: otaSessions.size,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        memory: process.memoryUsage()
     });
 });
 
-// Main dashboard
+// ============ DEBUG ENDPOINTS ============
+app.get('/api/debug/pending', (req, res) => {
+    const pendingList = [];
+    
+    pendingRequests.forEach((pending, requestId) => {
+        pendingList.push({
+            requestId: requestId,
+            deviceId: pending.deviceId,
+            age: Date.now() - pending.createdAt,
+            path: pending.path || '/index.html',
+            createdAt: new Date(pending.createdAt).toISOString()
+        });
+    });
+    
+    res.json({
+        timestamp: new Date().toISOString(),
+        pendingCount: pendingRequests.size,
+        pendingRequests: pendingList,
+        devicesCount: devices.size,
+        devices: Array.from(devices.keys())
+    });
+});
+
+app.get('/api/debug/devices', (req, res) => {
+    const deviceList = [];
+    
+    devices.forEach((device, deviceId) => {
+        deviceList.push({
+            deviceId: deviceId,
+            ip: device.ip,
+            lastSeen: device.lastSeen,
+            sessionId: device.sessionId,
+            queueLength: device.queue.length,
+            isOnline: (Date.now() - device.lastSeen) < 30000
+        });
+    });
+    
+    res.json(deviceList);
+});
+
+// ============ MAIN DASHBOARD ============
 app.get('/', (req, res) => {
+    console.log('Main dashboard accessed');
+    
     let onlineDevices = 0;
     let html = `
     <!DOCTYPE html>
@@ -82,6 +149,8 @@ app.get('/', (req, res) => {
                 border-radius: 5px;
                 cursor: pointer;
                 font-weight: bold;
+                text-decoration: none;
+                display: inline-block;
             }
             .btn-primary { background: #2196F3; color: white; }
             .btn-success { background: #4CAF50; color: white; }
@@ -90,30 +159,37 @@ app.get('/', (req, res) => {
     <body>
         <h1>SAT Web Connect Dashboard</h1>
         <p>Total devices: ${devices.size}</p>
+        <div>
+            <a href="/health" class="btn btn-primary">Health Check</a>
+            <a href="/api/debug/pending" class="btn btn-primary">Debug Pending</a>
+            <a href="/api/debug/devices" class="btn btn-primary">Debug Devices</a>
+        </div>
     `;
     
-    devices.forEach((device, deviceId) => {
-        const isOnline = (Date.now() - device.lastSeen) < 30000;
-        const otaActive = otaSessions.has(deviceId);
-        
-        if (isOnline) onlineDevices++;
-        
-        html += `
-        <div class="device-card">
-            <div class="device-header">
-                <div class="device-id">${deviceId}</div>
-                <div class="status ${isOnline ? 'online' : 'offline'}">
-                    ${isOnline ? 'Online' : 'Offline'}
+    if (devices.size === 0) {
+        html += '<p>No devices connected yet</p>';
+    } else {
+        devices.forEach((device, deviceId) => {
+            const isOnline = (Date.now() - device.lastSeen) < 30000;
+            if (isOnline) onlineDevices++;
+            
+            html += `
+            <div class="device-card">
+                <div class="device-header">
+                    <div class="device-id">${deviceId}</div>
+                    <div class="status ${isOnline ? 'online' : 'offline'}">
+                        ${isOnline ? 'Online' : 'Offline'}
+                    </div>
                 </div>
-            </div>
-            <p>IP: ${device.ip}</p>
-            <p>Last seen: ${new Date(device.lastSeen).toLocaleString()}</p>
-            <div>
-                <a href="/device/${deviceId}" class="btn btn-primary">Access Device</a>
-                ${isOnline ? `<a href="/ota.html?device=${deviceId}" class="btn btn-success">OTA Update</a>` : ''}
-            </div>
-        </div>`;
-    });
+                <p>IP: ${device.ip}</p>
+                <p>Last seen: ${new Date(device.lastSeen).toLocaleString()}</p>
+                <div>
+                    <a href="/device/${deviceId}" class="btn btn-primary">Access Device</a>
+                    ${isOnline ? `<a href="/ota.html?device=${deviceId}" class="btn btn-success">OTA Update</a>` : ''}
+                </div>
+            </div>`;
+        });
+    }
     
     html += `
         <p>Online: ${onlineDevices} | Offline: ${devices.size - onlineDevices}</p>
@@ -126,27 +202,39 @@ app.get('/', (req, res) => {
     res.send(html);
 });
 
-// OTA Dashboard
+// ============ OTA DASHBOARD ============
 app.get('/ota.html', (req, res) => {
+    const deviceId = req.query.device;
+    console.log(`OTA dashboard for device: ${deviceId}`);
+    
+    if (!fs.existsSync('dashboard.html')) {
+        return res.status(404).send('Dashboard file not found');
+    }
+    
     res.sendFile(path.join(__dirname, 'dashboard.html'));
 });
 
-// Device access
+// ============ DEVICE ACCESS ============
 app.get('/device/:deviceId', (req, res) => {
     const deviceId = req.params.deviceId;
+    console.log(`Device access requested: ${deviceId}`);
     
     const device = devices.get(deviceId);
-    if (!device || (Date.now() - device.lastSeen) > 30000) {
+    const isOnline = device && (Date.now() - device.lastSeen) < 30000;
+    
+    if (!device || !isOnline) {
+        console.log(`Device ${deviceId} is offline`);
         return res.status(503).send(`
             <html><body style="text-align:center;padding:50px;">
                 <h1>Device Offline</h1>
-                <p>The device ${deviceId} is currently offline.</p>
-                <button onclick="window.history.back()">Go Back</button>
+                <p>Device ${deviceId} is currently offline.</p>
+                <a href="/">Go to Dashboard</a>
             </body></html>
         `);
     }
     
-    // Create request ID
+    console.log(`Device ${deviceId} is online, creating request`);
+    
     const requestId = 'req_' + Date.now() + '_' + Math.random().toString(36).substr(2, 8);
     
     const command = {
@@ -159,58 +247,81 @@ app.get('/device/:deviceId', (req, res) => {
     
     device.queue.push(command);
     
-    // Create pending request
     const timeout = setTimeout(() => {
-        pendingRequests.delete(requestId);
-        res.status(504).send('Request timeout');
+        if (pendingRequests.has(requestId)) {
+            pendingRequests.delete(requestId);
+            console.log(`Request timeout: ${requestId}`);
+            res.status(504).send(`
+                <html><body style="text-align:center;padding:50px;">
+                    <h1>Timeout</h1>
+                    <p>Device ${deviceId} didn't respond.</p>
+                    <a href="/device/${deviceId}">Try Again</a>
+                </body></html>
+            `);
+        }
     }, 30000);
     
     pendingRequests.set(requestId, {
         timeout: timeout,
-        res: res
+        res: res,
+        deviceId: deviceId,
+        createdAt: Date.now(),
+        path: '/index.html'
     });
+    
+    console.log(`Request ${requestId} created, waiting for response`);
 });
 
-// Device access - any path
 app.get('/device/:deviceId/*', (req, res) => {
     const deviceId = req.params.deviceId;
-    const path = req.params[0] || 'index.html';
+    const requestedPath = req.params[0] || 'index.html';
+    
+    console.log(`Device path access: ${deviceId}/${requestedPath}`);
     
     const device = devices.get(deviceId);
-    if (!device || (Date.now() - device.lastSeen) > 30000) {
+    const isOnline = device && (Date.now() - device.lastSeen) < 30000;
+    
+    if (!device || !isOnline) {
         return res.status(503).send('Device offline');
     }
     
-    // Add HTTP request to device queue
     const requestId = 'req_' + Date.now() + '_' + Math.random().toString(36).substr(2, 8);
     
     const command = {
         type: 'http_request',
         requestId: requestId,
-        path: '/' + path,
+        path: '/' + requestedPath,
         method: 'GET',
         timestamp: new Date().toISOString()
     };
     
     device.queue.push(command);
     
-    // Create pending request
     const timeout = setTimeout(() => {
-        pendingRequests.delete(requestId);
-        res.status(504).send('Request timeout');
+        if (pendingRequests.has(requestId)) {
+            pendingRequests.delete(requestId);
+            res.status(504).send('Request timeout');
+        }
     }, 30000);
     
     pendingRequests.set(requestId, {
         timeout: timeout,
-        res: res
+        res: res,
+        deviceId: deviceId,
+        createdAt: Date.now(),
+        path: requestedPath
     });
 });
 
-// Register
+// ============ DEVICE REGISTRATION ============
 app.post('/api/register', (req, res) => {
+    console.log('\n=== REGISTER REQUEST ===');
+    console.log('Body:', req.body);
+    
     const { deviceId, ip } = req.body;
     
-    if (!deviceId?.startsWith('Sat_')) {
+    if (!deviceId || !deviceId.startsWith('Sat_')) {
+        console.log('Invalid device ID:', deviceId);
         return res.status(400).json({ error: 'Invalid device ID' });
     }
     
@@ -218,57 +329,117 @@ app.post('/api/register', (req, res) => {
     
     devices.set(deviceId, {
         sessionId: sessionId,
-        ip: ip,
+        ip: ip || req.ip,
         lastSeen: Date.now(),
-        queue: []
+        queue: [],
+        registeredAt: Date.now()
     });
     
-    console.log(`Registered: ${deviceId}`);
+    console.log(`Registered device: ${deviceId} with session ${sessionId}`);
     
     res.json({
         sessionId: sessionId,
         status: 'registered',
-        pollInterval: 10000
+        pollInterval: 10000,
+        serverTime: Date.now()
     });
 });
 
-// Poll
+// ============ DEVICE POLLING ============
 app.post('/api/poll', (req, res) => {
-    const { deviceId, session, otaActive } = req.body;
+    console.log('\n=== POLL REQUEST ===');
+    console.log('Body:', req.body);
+    
+    const { deviceId, session } = req.body;
+    
+    if (!deviceId || !session) {
+        console.log('Missing deviceId or session');
+        return res.status(400).json({ error: 'Missing parameters' });
+    }
     
     const device = devices.get(deviceId);
-    if (!device || device.sessionId !== session) {
+    if (!device) {
+        console.log(`Device not found: ${deviceId}`);
+        return res.status(404).json({ error: 'Device not found' });
+    }
+    
+    if (device.sessionId !== session) {
+        console.log(`Invalid session for ${deviceId}`);
+        console.log(`Expected: ${device.sessionId}, Received: ${session}`);
         return res.status(401).json({ error: 'Invalid session' });
     }
     
     device.lastSeen = Date.now();
     
-    // Check queue
     if (device.queue.length > 0) {
         const command = device.queue.shift();
+        console.log(`Sending command to ${deviceId}: ${command.type}`);
         res.json(command);
     } else {
+        console.log(`No commands for ${deviceId}`);
         res.status(204).end();
     }
 });
 
-// Response
+// ============ DEVICE RESPONSE ============
 app.post('/api/response', (req, res) => {
+    console.log('\n=== RESPONSE RECEIVED ===');
+    console.log('Full request body:', JSON.stringify(req.body));
+    
     const { requestId, contentType, body } = req.body;
     
+    if (!requestId) {
+        console.log('ERROR: No requestId in response');
+        return res.status(400).json({ 
+            error: 'Missing requestId',
+            receivedBody: req.body 
+        });
+    }
+    
+    console.log(`Request ID: ${requestId}`);
+    console.log(`Content-Type: ${contentType}`);
+    console.log(`Body length: ${body ? body.length : 0}`);
+    
+    if (body && body.length < 500) {
+        console.log(`Body: ${body}`);
+    } else if (body) {
+        console.log(`Body preview: ${body ? body.substring(0, 200) : ''}...`);
+    }
+    
     const pending = pendingRequests.get(requestId);
-    if (pending) {
-        pendingRequests.delete(requestId);
-        clearTimeout(pending.timeout);
-        
-        res.set('Content-Type', contentType);
-        res.send(body);
-    } else {
-        res.status(404).json({ error: 'Request not found' });
+    if (!pending) {
+        console.log(`ERROR: Request ${requestId} not found in pending requests`);
+        console.log(`Available pending requests: ${Array.from(pendingRequests.keys())}`);
+        return res.status(404).json({ 
+            error: 'Request not found or expired',
+            receivedRequestId: requestId,
+            availableRequests: Array.from(pendingRequests.keys())
+        });
+    }
+    
+    console.log(`Found pending request for ${requestId}`);
+    
+    // Clean up
+    pendingRequests.delete(requestId);
+    clearTimeout(pending.timeout);
+    
+    // Send response to client
+    console.log(`Forwarding response to client...`);
+    
+    try {
+        if (contentType) {
+            pending.res.set('Content-Type', contentType);
+        }
+        pending.res.send(body);
+        console.log(`Response forwarded successfully`);
+        res.json({ status: 'ok', forwarded: true });
+    } catch (error) {
+        console.log(`Error forwarding response: ${error.message}`);
+        res.status(500).json({ error: 'Failed to forward response' });
     }
 });
 
-// API endpoints for dashboard
+// ============ DEVICE LIST API ============
 app.get('/api/devices', (req, res) => {
     const deviceList = [];
     
@@ -282,15 +453,18 @@ app.get('/api/devices', (req, res) => {
             lastSeen: device.lastSeen,
             online: isOnline,
             otaActive: otaActive,
-            otaProgress: otaActive ? otaSessions.get(deviceId).progress : 0
+            otaProgress: otaActive ? otaSessions.get(deviceId).progress : 0,
+            sessionId: device.sessionId ? device.sessionId.substring(0, 20) + '...' : null
         });
     });
     
     res.json(deviceList);
 });
 
-// File upload for OTA
+// ============ OTA ENDPOINTS ============
 app.post('/api/upload', upload.single('firmware'), (req, res) => {
+    console.log('File upload request');
+    
     if (!req.file) {
         return res.status(400).json({ error: 'No file uploaded' });
     }
@@ -306,7 +480,6 @@ app.post('/api/upload', upload.single('firmware'), (req, res) => {
         return res.status(404).json({ error: 'Device not found' });
     }
     
-    // Store file info for OTA
     otaSessions.set(deviceId, {
         filePath: req.file.path,
         fileName: req.file.originalname,
@@ -323,7 +496,6 @@ app.post('/api/upload', upload.single('firmware'), (req, res) => {
     });
 });
 
-// Start OTA
 app.post('/api/ota/start', (req, res) => {
     const { deviceId } = req.body;
     
@@ -341,7 +513,6 @@ app.post('/api/ota/start', (req, res) => {
         return res.status(400).json({ error: 'No firmware uploaded for this device' });
     }
     
-    // Create OTA start command
     const requestId = 'ota_' + Date.now() + '_' + Math.random().toString(36).substr(2, 8);
     
     const command = {
@@ -353,7 +524,6 @@ app.post('/api/ota/start', (req, res) => {
     
     device.queue.push(command);
     
-    // Reset progress
     otaSession.progress = 0;
     otaSession.bytesSent = 0;
     
@@ -364,7 +534,6 @@ app.post('/api/ota/start', (req, res) => {
     });
 });
 
-// OTA status
 app.get('/api/ota/status/:deviceId', (req, res) => {
     const { deviceId } = req.params;
     const otaSession = otaSessions.get(deviceId);
@@ -385,14 +554,12 @@ app.get('/api/ota/status/:deviceId', (req, res) => {
     });
 });
 
-// Cancel OTA
 app.post('/api/ota/cancel', (req, res) => {
     const { deviceId } = req.body;
     
     if (deviceId && otaSessions.has(deviceId)) {
         const session = otaSessions.get(deviceId);
         
-        // Clean up file
         if (session.filePath && fs.existsSync(session.filePath)) {
             fs.unlinkSync(session.filePath);
         }
@@ -403,13 +570,64 @@ app.post('/api/ota/cancel', (req, res) => {
     res.json({ success: true });
 });
 
-// Start server
+// ============ ERROR HANDLING ============
+app.use((err, req, res, next) => {
+    console.error('Server error:', err.message);
+    console.error(err.stack);
+    res.status(500).json({ error: 'Internal server error' });
+});
+
+app.use((req, res) => {
+    console.log(`404 Not Found: ${req.method} ${req.url}`);
+    res.status(404).json({
+        error: 'Not Found',
+        message: `Endpoint ${req.method} ${req.url} not found`,
+        availableEndpoints: [
+            'GET /',
+            'GET /device/:id',
+            'GET /ota.html',
+            'GET /health',
+            'GET /api/devices',
+            'GET /api/debug/pending',
+            'GET /api/debug/devices',
+            'POST /api/register',
+            'POST /api/poll',
+            'POST /api/response',
+            'POST /api/upload',
+            'POST /api/ota/start',
+            'GET /api/ota/status/:id',
+            'POST /api/ota/cancel'
+        ]
+    });
+});
+
+// ============ START SERVER ============
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+    console.log(`\n========================================`);
+    console.log(`SAT Web Connect Server Started`);
+    console.log(`Port: ${PORT}`);
+    console.log(`========================================\n`);
     
-    // Create uploads directory if it doesn't exist
+    // Create uploads directory
     if (!fs.existsSync('uploads')) {
-        fs.mkdirSync('uploads');
+        fs.mkdirSync('uploads', { recursive: true });
+        console.log('Created uploads directory');
     }
+    
+    console.log('Available endpoints:');
+    console.log('  GET  /                    - Main dashboard');
+    console.log('  GET  /device/:id          - Access ESP32 device');
+    console.log('  GET  /ota.html            - OTA dashboard');
+    console.log('  GET  /health              - Health check');
+    console.log('  GET  /api/devices         - List all devices');
+    console.log('  GET  /api/debug/pending   - Debug pending requests');
+    console.log('  GET  /api/debug/devices   - Debug devices');
+    console.log('  POST /api/register        - Device registration');
+    console.log('  POST /api/poll            - Device polling');
+    console.log('  POST /api/response        - Response from device');
+    console.log('  POST /api/upload          - Upload firmware');
+    console.log('  POST /api/ota/start       - Start OTA');
+    console.log('  GET  /api/ota/status/:id  - OTA status');
+    console.log('  POST /api/ota/cancel      - Cancel OTA');
 });
