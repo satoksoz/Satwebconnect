@@ -320,6 +320,11 @@
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 
+                const contentType = response.headers.get("content-type");
+                if (!contentType || !contentType.includes("application/json")) {
+                    throw new Error('Server JSON dönmedi');
+                }
+                
                 devices = await response.json();
                 console.log(`✅ ${devices.length} çevrimiçi cihaz yüklendi`);
                 
@@ -335,8 +340,6 @@
         // İstatistikleri güncelle
         function updateStats() {
             document.getElementById('online-count').textContent = devices.length;
-            
-            // Sayfa başlığını da güncelle
             document.title = `(${devices.length}) ESP32 Dashboard`;
         }
         
@@ -361,8 +364,7 @@
             let html = '<div class="devices-grid">';
             
             devices.forEach(device => {
-                const lastSeenMinutes = Math.floor(device.lastSeenAgo / 60);
-                const lastSeenSeconds = device.lastSeenAgo % 60;
+                const lastSeenSeconds = device.lastSeenAgo || 0;
                 
                 html += `
                     <div class="device-card">
@@ -410,7 +412,7 @@
             `;
         }
         
-        // HTML aç
+        // HTML aç - CİHAZ DETAY SAYFASI
         function openHTML(deviceId) {
             window.open(`/device/${deviceId}`, '_blank');
         }
@@ -430,26 +432,38 @@
             selectedDevice = null;
         }
         
-        // OTA başlat
+        // OTA başlat - DÜZELTİLDİ
         async function startOTA() {
             if (!selectedDevice) {
                 alert('Cihaz seçilmedi!');
                 return;
             }
-            
+
             const fileInput = document.getElementById('otaFile');
             if (!fileInput.files[0]) {
                 alert('Lütfen firmware dosyası seçin!');
                 return;
             }
-            
+
             try {
                 const response = await fetch('/api/ota/start', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ deviceId: selectedDevice })
+                    headers: { 
+                        'Content-Type': 'application/json' 
+                    },
+                    body: JSON.stringify({ 
+                        deviceId: selectedDevice 
+                    })
                 });
+
+                const contentType = response.headers.get("content-type");
                 
+                if (!contentType || !contentType.includes("application/json")) {
+                    const text = await response.text();
+                    console.error('JSON olmayan response:', text);
+                    throw new Error('Server JSON dönmedi');
+                }
+
                 const result = await response.json();
                 
                 if (result.success) {
@@ -458,8 +472,9 @@
                 } else {
                     alert('❌ OTA başlatılamadı: ' + (result.error || 'Bilinmeyen hata'));
                 }
-                
+
             } catch (error) {
+                console.error('OTA hatası:', error);
                 alert('❌ Hata: ' + error.message);
             }
         }
