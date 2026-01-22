@@ -1,11 +1,8 @@
-[file name]: server.js
-[file content begin]
 const express = require('express');
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
-const https = require('https');
 
 const app = express();
 
