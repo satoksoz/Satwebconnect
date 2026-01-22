@@ -4,10 +4,20 @@ const fs = require('fs');
 const path = require('path');
 
 const app = express();
-const upload = multer({ dest: 'uploads/' });
 
-let devices = []; // {id, name, lastSeen, online, firmwareVersion}
-let otaJobs = {}; // {deviceId: {active: true, progress: 0, file: null}}
+// Memory storage kullanalım - dosyaları diske değil, memory'de saklayalım
+const storage = multer.memoryStorage(); // BU ÖNEMLİ DEĞİŞİKLİK
+const upload = multer({ 
+    storage: storage,
+    limits: {
+        fileSize: 10 * 1024 * 1024, // 10MB limit
+    }
+});
+
+// Memory'de saklanacak veriler
+let devices = [];
+let otaJobs = {};
+let firmwareFiles = {}; // {deviceId: {buffer, name, size, uploadedAt}}
 
 // Middleware
 app.use(express.json());
@@ -18,7 +28,7 @@ app.use((req, res, next) => {
     next();
 });
 
-// Uploads klasörü yoksa oluştur
+// Uploads klasörü yoksa oluştur (artık kullanılmayacak ama yine de olsun)
 if (!fs.existsSync('uploads')) {
     fs.mkdirSync('uploads');
 }
@@ -44,7 +54,7 @@ app.get('/', (req, res) => {
                 <p>Çevrimiçi: ${onlineCount} / Toplam: ${devices.length} cihaz</p>
                 <a href="/dashboard" class="btn">Dashboard'a Git</a>
                 <a href="/api/devices" target="_blank" class="btn">API Test</a>
-                <a href="/api/debug/endpoints" target="_blank" class="btn" style="background:#FF9800;">Debug Endpoints</a>
+                <a href="/api/debug" target="_blank" class="btn" style="background:#FF9800;">Debug</a>
             </div>
         </body>
         </html>
@@ -56,92 +66,55 @@ app.get('/dashboard', (req, res) => {
     res.sendFile(__dirname + '/public/dashboard.html');
 });
 
-// Cihaz detay sayfası
-app.get('/device/:deviceId', (req, res) => {
-    const deviceId = req.params.deviceId;
-    const device = devices.find(d => d.id === deviceId);
-    
-    if (!device) {
-        return res.status(404).send(`
-            <!DOCTYPE html>
-            <html>
-            <head><title>Cihaz Bulunamadı</title></head>
-            <body style="font-family:Arial; padding:40px; text-align:center;">
-                <h1 style="color:#f44336;">❌ Cihaz Bulunamadı</h1>
-                <p><strong>${deviceId}</strong> ID'li cihaz bulunamadı.</p>
-                <a href="/dashboard" style="padding:10px 20px; background:#4CAF50; color:white; text-decoration:none; border-radius:5px;">
-                    Dashboard'a Dön
-                </a>
-            </body>
-            </html>
-        `);
-    }
-    
-    const isOnline = (Date.now() - device.lastSeen) < 30000;
+// Debug sayfası
+app.get('/debug', (req, res) => {
+    const onlineCount = devices.filter(d => (Date.now() - d.lastSeen) < 30000).length;
     
     res.send(`
         <!DOCTYPE html>
         <html>
         <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>${device.name} - Cihaz Detayı</title>
+            <title>Debug - ESP32 Dashboard</title>
             <style>
-                body { font-family: Arial; padding: 20px; background: #f5f5f5; }
-                .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }
-                h1 { color: #333; }
-                .status { display: inline-block; padding: 5px 15px; border-radius: 20px; color: white; font-weight: bold; }
-                .online { background: #4CAF50; }
-                .offline { background: #f44336; }
-                .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0; }
-                .info-card { background: #f8f9fa; padding: 15px; border-radius: 8px; }
-                .info-item { margin: 10px 0; }
-                .label { font-weight: bold; color: #555; }
-                .value { color: #333; }
-                .btn { display: inline-block; padding: 10px 20px; background: #2196F3; color: white; text-decoration: none; border-radius: 5px; margin: 5px; }
+                body { font-family:Arial; padding:20px; background:#f0f2f5; }
+                .card { background:white; padding:20px; border-radius:10px; margin:10px 0; }
+                pre { background:#f5f5f5; padding:10px; border-radius:5px; overflow:auto; }
             </style>
         </head>
         <body>
-            <div class="container">
-                <h1>${device.name}</h1>
-                <span class="status ${isOnline ? 'online' : 'offline'}">
-                    ${isOnline ? '🟢 Çevrimiçi' : '🔴 Çevrimdışı'}
-                </span>
-                
-                <div class="info-grid">
-                    <div class="info-card">
-                        <h3>📊 Cihaz Bilgileri</h3>
-                        <div class="info-item"><span class="label">ID:</span> <span class="value">${device.id}</span></div>
-                        <div class="info-item"><span class="label">İsim:</span> <span class="value">${device.name}</span></div>
-                        <div class="info-item"><span class="label">Firmware:</span> <span class="value">${device.firmwareVersion || '1.0.0'}</span></div>
-                        <div class="info-item"><span class="label">Son Görülme:</span> <span class="value">${new Date(device.lastSeen).toLocaleString('tr-TR')}</span></div>
-                    </div>
-                    
-                    <div class="info-card">
-                        <h3>🌐 Durum</h3>
-                        <div class="info-item"><span class="label">Çevrimiçi:</span> <span class="value">${isOnline ? 'Evet' : 'Hayır'}</span></div>
-                        <div class="info-item"><span class="label">Kayıt Tarihi:</span> <span class="value">${new Date(device.registeredAt).toLocaleString('tr-TR')}</span></div>
-                        <div class="info-item"><span class="label">OTA Durumu:</span> <span class="value">${otaJobs[device.id]?.active ? 'Aktif (' + otaJobs[device.id].progress + '%)' : 'Aktif Değil'}</span></div>
-                    </div>
-                </div>
-                
-                <div style="margin-top: 30px;">
-                    <a href="/dashboard" class="btn">📊 Dashboard'a Dön</a>
-                    <a href="/api/devices" class="btn" target="_blank">📡 API'yi Gör</a>
-                    <a href="/dashboard" class="btn" style="background:#FF9800;">⚡ OTA Yap</a>
-                    <a href="/api/ota/download/${deviceId}" class="btn" style="background:#4CAF50;" target="_blank">📥 Firmware İndir</a>
-                </div>
+            <h1>🔧 Debug Panel</h1>
+            
+            <div class="card">
+                <h3>📊 İstatistikler</h3>
+                <p>Toplam Cihaz: ${devices.length}</p>
+                <p>Çevrimiçi Cihaz: ${onlineCount}</p>
+                <p>OTA Jobs: ${Object.keys(otaJobs).length}</p>
+                <p>Firmware Dosyaları: ${Object.keys(firmwareFiles).length}</p>
+            </div>
+            
+            <div class="card">
+                <h3>📋 Cihazlar</h3>
+                <pre>${JSON.stringify(devices, null, 2)}</pre>
+            </div>
+            
+            <div class="card">
+                <h3>⚡ OTA Jobs</h3>
+                <pre>${JSON.stringify(otaJobs, null, 2)}</pre>
+            </div>
+            
+            <div class="card">
+                <h3>📁 Firmware Dosyaları</h3>
+                <p>Memory'deki dosyalar: ${Object.keys(firmwareFiles).join(', ')}</p>
             </div>
         </body>
         </html>
     `);
 });
 
-// API: SADECE ÇEVRİMİÇİ CİHAZLARI GETİR
+// API: Çevrimiçi cihazları getir
 app.get('/api/devices', (req, res) => {
     const now = Date.now();
     
-    // Çevrimiçi cihazları filtrele
     const onlineDevices = devices
         .filter(device => (now - device.lastSeen) < 30000)
         .map(device => ({
@@ -170,11 +143,6 @@ app.post('/api/register', (req, res) => {
         device.lastSeen = Date.now();
         device.name = deviceName || device.name;
         device.firmwareVersion = firmwareVersion || device.firmwareVersion;
-        
-        // Eğer OTA devam ediyorsa, progress'i güncelle
-        if (otaInProgress && otaJobs[deviceId]) {
-            otaJobs[deviceId].active = true;
-        }
     } else {
         // Yeni cihaz
         device = {
@@ -188,7 +156,7 @@ app.post('/api/register', (req, res) => {
         devices.push(device);
     }
     
-    console.log(`✅ Cihaz kaydedildi: ${deviceId} - ${device.name} - FW: ${device.firmwareVersion}`);
+    console.log(`✅ Cihaz kaydedildi: ${deviceId} - ${device.name}`);
     
     res.json({ 
         success: true, 
@@ -197,7 +165,7 @@ app.post('/api/register', (req, res) => {
     });
 });
 
-// API: OTA için dosya yükleme
+// API: OTA için dosya yükleme (MEMORY STORAGE)
 app.post('/api/ota/upload', upload.single('firmware'), (req, res) => {
     if (!req.file) {
         return res.status(400).json({ error: 'Dosya yüklenmedi' });
@@ -206,32 +174,41 @@ app.post('/api/ota/upload', upload.single('firmware'), (req, res) => {
     const { deviceId } = req.body;
     
     if (!deviceId) {
-        // Dosyayı sil
-        fs.unlinkSync(req.file.path);
         return res.status(400).json({ error: 'Device ID gerekli' });
     }
     
     // Dosya uzantısı kontrolü
     if (!req.file.originalname.toLowerCase().endsWith('.bin')) {
-        fs.unlinkSync(req.file.path);
         return res.status(400).json({ error: 'Sadece .bin uzantılı dosyalar yüklenebilir' });
     }
     
-    // OTA job oluştur
-    otaJobs[deviceId] = {
-        active: false,
-        progress: 0,
-        file: {
-            path: req.file.path,
-            name: req.file.originalname,
-            size: req.file.size,
-            uploadedAt: Date.now()
-        },
-        startedAt: null,
-        completedAt: null
+    // Firmware dosyasını memory'de sakla
+    firmwareFiles[deviceId] = {
+        buffer: req.file.buffer,
+        name: req.file.originalname,
+        size: req.file.size,
+        uploadedAt: Date.now(),
+        mimetype: req.file.mimetype
     };
     
-    console.log(`📁 OTA dosyası yüklendi: ${req.file.originalname} (${req.file.size} bytes) - ${deviceId}`);
+    // OTA job oluştur veya güncelle
+    if (!otaJobs[deviceId]) {
+        otaJobs[deviceId] = {
+            active: false,
+            progress: 0,
+            startedAt: null,
+            completedAt: null
+        };
+    }
+    
+    otaJobs[deviceId].file = {
+        name: req.file.originalname,
+        size: req.file.size,
+        uploadedAt: Date.now()
+    };
+    
+    console.log(`📁 Firmware memory'ye kaydedildi: ${deviceId} - ${req.file.originalname} (${req.file.size} bytes)`);
+    console.log(`📁 Memory'deki firmware dosyaları: ${Object.keys(firmwareFiles).length}`);
     
     res.json({
         success: true,
@@ -239,76 +216,47 @@ app.post('/api/ota/upload', upload.single('firmware'), (req, res) => {
         filename: req.file.originalname,
         size: req.file.size,
         deviceId: deviceId,
-        downloadUrl: `/api/ota/download/${deviceId}`
+        downloadUrl: `/api/ota/download/${deviceId}`,
+        inMemory: true
     });
 });
 
-// API: OTA firmware indirme (ESP32 için) - BU ÇOK ÖNEMLİ!
+// API: OTA firmware indirme (MEMORY'DEN)
 app.get('/api/ota/download/:deviceId', (req, res) => {
     const deviceId = req.params.deviceId;
-    const otaJob = otaJobs[deviceId];
+    const firmwareFile = firmwareFiles[deviceId];
     
     console.log(`📥 Firmware indirme isteği: ${deviceId}`);
-    console.log(`📥 OTA job mevcut: ${!!otaJob}`);
+    console.log(`📥 Memory'de dosya var mı: ${!!firmwareFile}`);
+    console.log(`📥 Memory'deki tüm dosyalar: ${Object.keys(firmwareFiles).join(', ')}`);
     
-    if (!otaJob) {
-        console.log(`❌ OTA job bulunamadı: ${deviceId}`);
+    if (!firmwareFile) {
         return res.status(404).json({ 
             error: 'Firmware dosyası bulunamadı',
-            message: 'Önce firmware dosyası yükleyin ve OTA başlatın',
+            message: 'Önce firmware dosyası yükleyin',
             deviceId: deviceId,
-            availableJobs: Object.keys(otaJobs)
-        });
-    }
-    
-    if (!otaJob.file) {
-        console.log(`❌ OTA dosyası bulunamadı: ${deviceId}`);
-        return res.status(404).json({ 
-            error: 'Firmware dosyası bulunamadı',
-            deviceId: deviceId 
-        });
-    }
-    
-    const filePath = otaJob.file.path;
-    
-    console.log(`📥 Dosya yolu: ${filePath}`);
-    console.log(`📥 Dosya adı: ${otaJob.file.name}`);
-    
-    if (!fs.existsSync(filePath)) {
-        console.log(`❌ Dosya fiziksel olarak bulunamadı: ${filePath}`);
-        return res.status(404).json({ 
-            error: 'Dosya bulunamadı',
-            path: filePath,
-            exists: fs.existsSync(filePath)
+            availableFiles: Object.keys(firmwareFiles)
         });
     }
     
     try {
-        // Content-Type'ı binary olarak ayarla
+        // Binary dosya olarak gönder
         res.setHeader('Content-Type', 'application/octet-stream');
-        res.setHeader('Content-Disposition', `attachment; filename="${otaJob.file.name}"`);
-        res.setHeader('Content-Length', otaJob.file.size);
+        res.setHeader('Content-Disposition', `attachment; filename="${firmwareFile.name}"`);
+        res.setHeader('Content-Length', firmwareFile.size);
         
-        console.log(`📥 Firmware gönderiliyor: ${deviceId} - ${otaJob.file.name} (${otaJob.file.size} bytes)`);
+        console.log(`📥 Firmware gönderiliyor: ${deviceId} - ${firmwareFile.name} (${firmwareFile.size} bytes)`);
         
-        // Dosyayı stream et
-        const fileStream = fs.createReadStream(filePath);
-        fileStream.pipe(res);
+        // Buffer'ı gönder
+        res.send(firmwareFile.buffer);
         
-        fileStream.on('error', (err) => {
-            console.error(`❌ Dosya stream hatası: ${err.message}`);
-            res.status(500).json({ error: 'Dosya okuma hatası' });
-        });
-        
-        res.on('finish', () => {
-            console.log(`✅ Firmware başarıyla gönderildi: ${deviceId}`);
-        });
+        console.log(`✅ Firmware başarıyla gönderildi: ${deviceId}`);
         
     } catch (err) {
         console.error(`❌ Firmware indirme hatası: ${err.message}`);
         res.status(500).json({ 
             error: 'Dosya gönderme hatası',
-            message: err.message 
+            message: err.message
         });
     }
 });
@@ -323,35 +271,34 @@ app.post('/api/ota/progress', (req, res) => {
         return res.status(400).json({ error: 'Device ID ve progress gerekli' });
     }
     
-    const otaJob = otaJobs[deviceId];
+    if (!otaJobs[deviceId]) {
+        otaJobs[deviceId] = {
+            active: false,
+            progress: 0,
+            startedAt: null,
+            completedAt: null
+        };
+    }
     
-    if (otaJob) {
-        otaJob.progress = progress;
-        otaJob.active = status !== 'completed';
+    otaJobs[deviceId].progress = progress;
+    otaJobs[deviceId].active = status !== 'completed';
+    
+    if (status === 'completed') {
+        otaJobs[deviceId].completedAt = Date.now();
+        console.log(`✅ OTA tamamlandı: ${deviceId} - %${progress}`);
         
-        if (status === 'completed') {
-            otaJob.completedAt = Date.now();
-            console.log(`✅ OTA tamamlandı: ${deviceId} - %${progress}`);
-            
-            // Dosyayı temizle (isteğe bağlı)
-            setTimeout(() => {
-                if (otaJob.file && fs.existsSync(otaJob.file.path)) {
-                    try {
-                        fs.unlinkSync(otaJob.file.path);
-                        console.log(`🗑️ Firmware dosyası silindi: ${deviceId}`);
-                    } catch (err) {
-                        console.error(`🗑️ Dosya silme hatası: ${err.message}`);
-                    }
-                }
-            }, 60000); // 1 dakika sonra sil
-        } else if (status === 'failed') {
-            otaJob.active = false;
-            console.log(`❌ OTA başarısız: ${deviceId} - %${progress}`);
-        } else {
-            console.log(`📊 OTA progress: ${deviceId} - %${progress}`);
-        }
+        // Firmware dosyasını temizle (isteğe bağlı)
+        setTimeout(() => {
+            if (firmwareFiles[deviceId]) {
+                delete firmwareFiles[deviceId];
+                console.log(`🗑️ Firmware dosyası memory'den silindi: ${deviceId}`);
+            }
+        }, 60000); // 1 dakika sonra sil
+    } else if (status === 'failed') {
+        otaJobs[deviceId].active = false;
+        console.log(`❌ OTA başarısız: ${deviceId} - %${progress}`);
     } else {
-        console.log(`⚠️ OTA job bulunamadı: ${deviceId}`);
+        console.log(`📊 OTA progress: ${deviceId} - %${progress}`);
     }
     
     res.json({ 
@@ -373,38 +320,55 @@ app.post('/api/ota/start', (req, res) => {
     }
     
     const device = devices.find(d => d.id === deviceId);
-    const otaJob = otaJobs[deviceId];
+    const firmwareFile = firmwareFiles[deviceId];
     
     if (!device) {
         console.log(`❌ Cihaz bulunamadı: ${deviceId}`);
         return res.status(404).json({ error: 'Cihaz bulunamadı' });
     }
     
-    if (!otaJob || !otaJob.file) {
+    if (!firmwareFile) {
         console.log(`❌ Firmware dosyası bulunamadı: ${deviceId}`);
-        console.log(`❌ Mevcut OTA job: ${JSON.stringify(otaJob)}`);
+        console.log(`❌ Memory'deki dosyalar: ${Object.keys(firmwareFiles).join(', ')}`);
         return res.status(400).json({ 
             error: 'Önce firmware dosyası yükleyin',
-            hasOTAJob: !!otaJob,
-            hasFile: !!(otaJob && otaJob.file)
+            hasFirmwareFile: !!firmwareFile,
+            availableFiles: Object.keys(firmwareFiles)
         });
     }
     
-    // OTA'yı aktif et
-    otaJob.active = true;
-    otaJob.progress = 0;
-    otaJob.startedAt = Date.now();
-    otaJob.completedAt = null;
+    // OTA job oluştur veya güncelle
+    if (!otaJobs[deviceId]) {
+        otaJobs[deviceId] = {
+            active: false,
+            progress: 0,
+            startedAt: null,
+            completedAt: null
+        };
+    }
     
-    console.log(`🚀 OTA başlatıldı: ${deviceId} - ${otaJob.file.name}`);
+    // OTA'yı aktif et
+    otaJobs[deviceId].active = true;
+    otaJobs[deviceId].progress = 0;
+    otaJobs[deviceId].startedAt = Date.now();
+    otaJobs[deviceId].completedAt = null;
+    otaJobs[deviceId].file = {
+        name: firmwareFile.name,
+        size: firmwareFile.size
+    };
+    
+    console.log(`🚀 OTA başlatıldı: ${deviceId} - ${firmwareFile.name}`);
+    console.log(`📁 Memory'deki dosya boyutu: ${firmwareFile.size} bytes`);
+    console.log(`📁 Download URL: /api/ota/download/${deviceId}`);
     
     res.json({
         success: true,
         message: 'OTA güncellemesi başlatıldı',
         deviceId: deviceId,
-        filename: otaJob.file.name,
-        size: otaJob.file.size,
-        downloadUrl: `/api/ota/download/${deviceId}`
+        filename: firmwareFile.name,
+        size: firmwareFile.size,
+        downloadUrl: `/api/ota/download/${deviceId}`,
+        inMemory: true
     });
 });
 
@@ -412,58 +376,26 @@ app.post('/api/ota/start', (req, res) => {
 app.get('/api/ota/status/:deviceId', (req, res) => {
     const deviceId = req.params.deviceId;
     const otaJob = otaJobs[deviceId];
+    const firmwareFile = firmwareFiles[deviceId];
     
     console.log(`📡 OTA status isteği: ${deviceId}`);
     
-    if (!otaJob) {
-        console.log(`⚠️ OTA job bulunamadı: ${deviceId}`);
-        return res.json({
-            active: false,
-            progress: 0,
-            hasFile: false,
-            deviceId: deviceId,
-            message: 'OTA job bulunamadı'
-        });
-    }
-    
     const response = {
-        active: otaJob.active || false,
-        progress: otaJob.progress || 0,
-        hasFile: !!otaJob.file,
-        filename: otaJob.file?.name,
-        size: otaJob.file?.size,
-        startedAt: otaJob.startedAt,
-        completedAt: otaJob.completedAt,
+        active: otaJob?.active || false,
+        progress: otaJob?.progress || 0,
+        hasFile: !!firmwareFile,
+        filename: firmwareFile?.name,
+        size: firmwareFile?.size,
+        startedAt: otaJob?.startedAt,
+        completedAt: otaJob?.completedAt,
         downloadUrl: `/api/ota/download/${deviceId}`,
-        deviceId: deviceId
+        deviceId: deviceId,
+        inMemory: !!firmwareFile
     };
     
     console.log(`📡 OTA status yanıtı: ${JSON.stringify(response)}`);
     
     res.json(response);
-});
-
-// API: Tüm OTA job'larını getir
-app.get('/api/ota/jobs', (req, res) => {
-    const jobs = {};
-    
-    Object.keys(otaJobs).forEach(deviceId => {
-        const job = otaJobs[deviceId];
-        jobs[deviceId] = {
-            active: job.active,
-            progress: job.progress,
-            hasFile: !!job.file,
-            filename: job.file?.name,
-            deviceId: deviceId,
-            startedAt: job.startedAt,
-            completedAt: job.completedAt
-        };
-    });
-    
-    res.json({
-        jobs: jobs,
-        count: Object.keys(jobs).length
-    });
 });
 
 // API: OTA iptal
@@ -476,25 +408,17 @@ app.post('/api/ota/cancel', (req, res) => {
         return res.status(400).json({ error: 'Device ID gerekli' });
     }
     
-    const otaJob = otaJobs[deviceId];
-    
-    if (otaJob) {
-        // Dosyayı sil
-        if (otaJob.file && fs.existsSync(otaJob.file.path)) {
-            try {
-                fs.unlinkSync(otaJob.file.path);
-                console.log(`🗑️ OTA dosyası silindi: ${deviceId}`);
-            } catch (err) {
-                console.error(`🗑️ Dosya silme hatası: ${err.message}`);
-            }
-        }
-        
-        // Job'ı sil
-        delete otaJobs[deviceId];
-        
+    // OTA job'ını sıfırla
+    if (otaJobs[deviceId]) {
+        otaJobs[deviceId].active = false;
+        otaJobs[deviceId].progress = 0;
         console.log(`❌ OTA iptal edildi: ${deviceId}`);
-    } else {
-        console.log(`⚠️ İptal edilecek OTA job bulunamadı: ${deviceId}`);
+    }
+    
+    // Firmware dosyasını sil (isteğe bağlı)
+    if (firmwareFiles[deviceId]) {
+        delete firmwareFiles[deviceId];
+        console.log(`🗑️ Firmware dosyası memory'den silindi: ${deviceId}`);
     }
     
     res.json({
@@ -504,7 +428,31 @@ app.post('/api/ota/cancel', (req, res) => {
     });
 });
 
-// API: Tüm cihazları getir (çevrimiçi + çevrimdışı)
+// API: Tüm OTA job'larını getir
+app.get('/api/ota/jobs', (req, res) => {
+    const jobs = {};
+    
+    Object.keys(otaJobs).forEach(deviceId => {
+        const job = otaJobs[deviceId];
+        jobs[deviceId] = {
+            active: job.active,
+            progress: job.progress,
+            hasFile: !!firmwareFiles[deviceId],
+            filename: firmwareFiles[deviceId]?.name,
+            deviceId: deviceId,
+            startedAt: job.startedAt,
+            completedAt: job.completedAt
+        };
+    });
+    
+    res.json({
+        jobs: jobs,
+        count: Object.keys(jobs).length,
+        firmwareFilesCount: Object.keys(firmwareFiles).length
+    });
+});
+
+// API: Tüm cihazları getir
 app.get('/api/devices/all', (req, res) => {
     const now = Date.now();
     
@@ -535,9 +483,14 @@ app.delete('/api/devices/:deviceId', (req, res) => {
         devices.splice(index, 1);
         console.log(`🗑️ Cihaz silindi: ${deviceId}`);
         
-        // OTA job'ını da temizle
+        // OTA job'ını temizle
         if (otaJobs[deviceId]) {
             delete otaJobs[deviceId];
+        }
+        
+        // Firmware dosyasını temizle
+        if (firmwareFiles[deviceId]) {
+            delete firmwareFiles[deviceId];
         }
         
         res.json({ 
@@ -546,7 +499,6 @@ app.delete('/api/devices/:deviceId', (req, res) => {
             deviceId: deviceId
         });
     } else {
-        console.log(`❌ Silinecek cihaz bulunamadı: ${deviceId}`);
         res.status(404).json({ 
             error: 'Cihaz bulunamadı',
             deviceId: deviceId
@@ -554,36 +506,16 @@ app.delete('/api/devices/:deviceId', (req, res) => {
     }
 });
 
-// Debug: Tüm endpoint'leri listele
-app.get('/api/debug/endpoints', (req, res) => {
-    const endpoints = [];
-    
-    function getEndpoints(stack, basePath = '') {
-        stack.forEach((middleware) => {
-            if (middleware.route) {
-                // routes registered directly on the app
-                const methods = Object.keys(middleware.route.methods);
-                endpoints.push({
-                    path: basePath + middleware.route.path,
-                    methods: methods
-                });
-            } else if (middleware.name === 'router') {
-                // router middleware
-                if (middleware.handle && middleware.handle.stack) {
-                    getEndpoints(middleware.handle.stack, basePath);
-                }
-            }
-        });
-    }
-    
-    getEndpoints(app._router.stack);
-    
+// Debug endpoint
+app.get('/api/debug', (req, res) => {
     res.json({
-        endpoints: endpoints,
-        totalEndpoints: endpoints.length,
+        devicesCount: devices.length,
+        otaJobsCount: Object.keys(otaJobs).length,
+        firmwareFilesCount: Object.keys(firmwareFiles).length,
+        devices: devices.map(d => ({ id: d.id, name: d.name, lastSeen: d.lastSeen })),
         otaJobs: Object.keys(otaJobs),
-        totalDevices: devices.length,
-        serverTime: new Date().toISOString()
+        firmwareFiles: Object.keys(firmwareFiles),
+        timestamp: Date.now()
     });
 });
 
@@ -600,58 +532,9 @@ app.get('/health', (req, res) => {
             online: onlineCount
         },
         otaJobs: Object.keys(otaJobs).length,
+        firmwareFiles: Object.keys(firmwareFiles).length,
         uptime: process.uptime(),
         memoryUsage: process.memoryUsage()
-    });
-});
-
-// API: Server bilgileri
-app.get('/api/server/info', (req, res) => {
-    res.json({
-        name: 'ESP32 Dashboard Server',
-        version: '1.0.0',
-        endpoints: [
-            '/api/devices',
-            '/api/register',
-            '/api/ota/upload',
-            '/api/ota/start',
-            '/api/ota/status/:deviceId',
-            '/api/ota/download/:deviceId',
-            '/api/ota/progress',
-            '/health',
-            '/api/debug/endpoints'
-        ],
-        timestamp: Date.now()
-    });
-});
-
-// API: Test endpoint - Firmware dosyası kontrolü
-app.get('/api/test/download/:deviceId', (req, res) => {
-    const deviceId = req.params.deviceId;
-    const otaJob = otaJobs[deviceId];
-    
-    if (!otaJob) {
-        return res.json({
-            success: false,
-            message: 'OTA job bulunamadı',
-            deviceId: deviceId,
-            availableJobs: Object.keys(otaJobs)
-        });
-    }
-    
-    res.json({
-        success: true,
-        deviceId: deviceId,
-        otaJob: {
-            active: otaJob.active,
-            progress: otaJob.progress,
-            hasFile: !!otaJob.file,
-            filename: otaJob.file?.name,
-            size: otaJob.file?.size,
-            path: otaJob.file?.path,
-            fileExists: otaJob.file ? fs.existsSync(otaJob.file.path) : false
-        },
-        downloadUrl: `/api/ota/download/${deviceId}`
     });
 });
 
@@ -663,8 +546,7 @@ app.use((req, res) => {
         error: 'Endpoint bulunamadı',
         path: req.path,
         method: req.method,
-        timestamp: Date.now(),
-        suggestion: 'Geçerli endpointler için /api/debug/endpoints adresini ziyaret edin'
+        timestamp: Date.now()
     });
 });
 
@@ -675,8 +557,7 @@ app.use((err, req, res, next) => {
     res.status(500).json({
         error: 'Internal server error',
         message: err.message,
-        timestamp: Date.now(),
-        stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+        timestamp: Date.now()
     });
 });
 
@@ -685,16 +566,18 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`
 ========================================
-✅ ESP32 Dashboard Server
+✅ ESP32 Dashboard Server (MEMORY STORAGE)
 ========================================
 🚀 Port: ${PORT}
 🏠 Ana Sayfa: http://localhost:${PORT}
 📊 Dashboard: http://localhost:${PORT}/dashboard
+🔧 Debug: http://localhost:${PORT}/debug
 📡 API: http://localhost:${PORT}/api/devices
 ⚡ OTA: http://localhost:${PORT}/api/ota
 📥 Download: http://localhost:${PORT}/api/ota/download/:deviceId
-🔧 Debug: http://localhost:${PORT}/api/debug/endpoints
 ❤️  Health: http://localhost:${PORT}/health
+========================================
+NOT: Firmware dosyaları memory'de saklanıyor!
 ========================================
     `);
 });
