@@ -1,3 +1,5 @@
+[file name]: server.js
+[file content begin]
 const express = require('express');
 const multer = require('multer');
 const fs = require('fs');
@@ -178,7 +180,7 @@ app.all('/device/:deviceId/proxy/*', async (req, res) => {
 app.get('/device/:deviceId', (req, res) => {
     const deviceId = req.params.deviceId;
     const device = devices.find(d => d.id === deviceId);
-    const deviceState = deviceStates[deviceId] || { ledState: false, temperature: 25.0, ipAddress: null };
+    const deviceState = deviceStates[deviceId] || { ipAddress: null };
     
     if (!device) {
         return res.status(404).send(`
@@ -239,10 +241,9 @@ app.get('/device/:deviceId', (req, res) => {
                     
                     <div class="info-card">
                         <h3>🌐 Durum</h3>
-                        <p><strong>Sıcaklık:</strong> ${deviceState.temperature.toFixed(1)}°C</p>
-                        <p><strong>LED:</strong> ${deviceState.ledState ? '🟢 AÇIK' : '🔴 KAPALI'}</p>
                         <p><strong>Son Görülme:</strong> ${new Date(device.lastSeen).toLocaleString()}</p>
                         <p><strong>OTA:</strong> ${otaJob?.active ? 'Aktif' : 'Aktif Değil'}</p>
+                        <p><strong>Port:</strong> ${deviceState.port || 80}</p>
                     </div>
                 </div>
                 
@@ -252,8 +253,7 @@ app.get('/device/:deviceId', (req, res) => {
                 
                 <div style="margin-top: 20px;">
                     <a href="/device/${deviceId}/html" class="btn" target="_blank">🔗 Yeni Sekmede Aç</a>
-                    <a href="/device/${deviceId}/proxy/temperature" class="btn" target="_blank">🌡️ Sıcaklık</a>
-                    <a href="/device/${deviceId}/proxy/led/toggle" class="btn" target="_blank">💡 LED Kontrol</a>
+                    <a href="/device/${deviceId}/proxy" class="btn" target="_blank">🌐 Tüm Endpoint'ler</a>
                     <a href="/dashboard" class="btn">📊 Dashboard</a>
                 </div>
             </div>
@@ -303,8 +303,7 @@ app.get('/debug', (req, res) => {
                     <div style="margin:10px 0; padding:10px; border:1px solid #ddd; border-radius:5px;">
                         <strong>${d.name}</strong> (${d.id})<br>
                         IP: ${state.ipAddress || 'Bilinmiyor'}<br>
-                        Sıcaklık: ${state.temperature?.toFixed(1) || '25.0'}°C<br>
-                        LED: ${state.ledState ? '🟢 AÇIK' : '🔴 KAPALI'}<br>
+                        Port: ${state.port || 80}<br>
                         <a href="/device/${d.id}" class="btn" style="background:#4CAF50; padding:5px 10px; font-size:12px;">Detay</a>
                         <a href="/device/${d.id}/html" class="btn" style="background:#2196F3; padding:5px 10px; font-size:12px;" target="_blank">HTML</a>
                     </div>
@@ -334,7 +333,7 @@ app.get('/api/device/status/:deviceId', (req, res) => {
     
     res.json({
         device: device,
-        deviceState: deviceState || { ledState: false, temperature: 25.0 },
+        deviceState: deviceState || { ipAddress: null, port: 80 },
         online: isOnline,
         lastSeenAgo: Math.round((Date.now() - device.lastSeen) / 1000),
         otaActive: otaJobs[deviceId]?.active || false,
@@ -350,7 +349,7 @@ app.get('/api/devices', (req, res) => {
     const onlineDevices = devices
         .filter(device => (now - device.lastSeen) < 30000)
         .map(device => {
-            const deviceState = deviceStates[device.id] || { ledState: false, temperature: 25.0 };
+            const deviceState = deviceStates[device.id] || { ipAddress: null, port: 80 };
             
             return {
                 ...device,
@@ -359,9 +358,8 @@ app.get('/api/devices', (req, res) => {
                 otaActive: otaJobs[device.id]?.active || false,
                 otaProgress: otaJobs[device.id]?.progress || 0,
                 hasFirmware: !!firmwareFiles[device.id],
-                ledState: deviceState.ledState,
-                temperature: deviceState.temperature,
-                ipAddress: deviceState.ipAddress
+                ipAddress: deviceState.ipAddress,
+                port: deviceState.port || 80
             };
         });
     
@@ -371,7 +369,6 @@ app.get('/api/devices', (req, res) => {
 // API: Cihaz kaydı
 app.post('/api/register', (req, res) => {
     const { deviceId, deviceName = 'ESP32', firmwareVersion = '1.0.0', 
-            otaInProgress = false, temperature = 25.0, ledState = false, 
             ipAddress = null, port = 80 } = req.body;
     
     if (!deviceId) {
@@ -400,14 +397,12 @@ app.post('/api/register', (req, res) => {
     
     // Cihaz durumunu güncelle
     deviceStates[deviceId] = {
-        ledState: ledState,
-        temperature: temperature,
         ipAddress: ipAddress,
         port: port,
         lastUpdate: Date.now()
     };
     
-    console.log(`✅ Cihaz kaydedildi: ${deviceId} - ${device.name} - IP: ${ipAddress}`);
+    console.log(`✅ Cihaz kaydedildi: ${deviceId} - ${device.name} - IP: ${ipAddress}:${port}`);
     
     res.json({ 
         success: true, 
@@ -676,9 +671,8 @@ app.get('/health', (req, res) => {
             id: device.id,
             name: device.name,
             online: (Date.now() - device.lastSeen) < 30000,
-            ledState: state.ledState || false,
-            temperature: state.temperature || 25.0,
-            ipAddress: state.ipAddress
+            ipAddress: state.ipAddress,
+            port: state.port || 80
         };
     });
     
@@ -723,3 +717,4 @@ app.listen(PORT, () => {
 ========================================
     `);
 });
+[file content end]
