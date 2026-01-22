@@ -1,5 +1,3 @@
-[file name]: server.js
-[file content begin]
 const express = require('express');
 const multer = require('multer');
 const fs = require('fs');
@@ -717,4 +715,3 @@ app.listen(PORT, () => {
 ========================================
     `);
 });
-[file content end]
