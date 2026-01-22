@@ -177,32 +177,30 @@
             margin-top: 5px;
         }
         
-        /* ESP32 HTML Modal */
-        .html-modal {
+        /* Modal */
+        .modal {
             display: none;
             position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0,0,0,0.5);
             z-index: 1000;
-            align-items: center;
-            justify-content: center;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
         }
         
         .modal-content {
-            background: white;
-            width: 90%;
-            height: 90%;
+            background-color: white;
+            margin: 5% auto;
+            padding: 0;
             border-radius: 10px;
-            display: flex;
-            flex-direction: column;
+            width: 80%;
+            max-width: 600px;
             overflow: hidden;
         }
         
         .modal-header {
-            padding: 15px;
+            padding: 15px 20px;
             background: #f8f9fa;
             border-bottom: 1px solid #ddd;
             display: flex;
@@ -210,49 +208,53 @@
             align-items: center;
         }
         
-        .modal-title {
-            font-size: 16px;
+        .modal-header h2 {
+            margin: 0;
             color: #333;
         }
         
-        .close-modal {
-            cursor: pointer;
-            font-size: 22px;
+        .close {
             color: #666;
-            padding: 5px;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+            padding: 0 10px;
+        }
+        
+        .close:hover {
+            color: #333;
         }
         
         .modal-body {
-            flex: 1;
-            position: relative;
+            padding: 20px;
+            max-height: 70vh;
+            overflow-y: auto;
         }
         
-        .modal-iframe {
-            width: 100%;
-            height: 100%;
-            border: none;
-        }
-        
-        .modal-actions {
-            padding: 12px;
+        .device-info {
             background: #f8f9fa;
-            border-top: 1px solid #ddd;
-            display: flex;
-            gap: 8px;
-            justify-content: center;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
         }
         
-        .modal-btn {
-            padding: 6px 12px;
-            background: #2196F3;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
+        .device-info h3 {
+            margin-top: 0;
+            color: #333;
+            border-bottom: 2px solid #2196F3;
+            padding-bottom: 5px;
         }
         
-        .modal-btn:hover {
-            opacity: 0.9;
+        .device-info p {
+            margin: 8px 0;
+        }
+        
+        .error {
+            background: #ffebee;
+            color: #c62828;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
         }
         
         /* OTA Modal */
@@ -404,28 +406,15 @@
         <i class="fas fa-sync-alt"></i>
     </div>
     
-    <!-- ESP32 HTML Modal -->
-    <div id="htmlModal" class="html-modal">
+    <!-- Device Info Modal -->
+    <div id="deviceInfoModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <div class="modal-title" id="modalDeviceName">ESP32 Arayüzü</div>
-                <span class="close-modal" onclick="closeHTMLModal()">×</span>
+                <h2 id="modalDeviceName">Cihaz Bilgileri</h2>
+                <span class="close" onclick="closeDeviceInfoModal()">&times;</span>
             </div>
-            
-            <div class="modal-body">
-                <iframe id="esp32Iframe" class="modal-iframe" src="" title="ESP32 Arayüzü"></iframe>
-            </div>
-            
-            <div class="modal-actions">
-                <button class="modal-btn" onclick="refreshIframe()">
-                    <i class="fas fa-sync-alt"></i> Yenile
-                </button>
-                <button class="modal-btn" onclick="openInNewTab()">
-                    <i class="fas fa-external-link-alt"></i> Yeni Sekmede Aç
-                </button>
-                <button class="modal-btn" onclick="closeHTMLModal()" style="background: #757575;">
-                    <i class="fas fa-times"></i> Kapat
-                </button>
+            <div class="modal-body" id="deviceInfoContent">
+                <div class="loading">Yükleniyor...</div>
             </div>
         </div>
     </div>
@@ -473,7 +462,6 @@
     
     <script>
         let devices = [];
-        let currentIframeUrl = '';
         let selectedDeviceForOTA = null;
         
         // Sayfa yüklendiğinde çalıştır
@@ -487,7 +475,7 @@
             // ESC tuşu ile modal kapatma
             document.addEventListener('keydown', function(event) {
                 if (event.key === 'Escape') {
-                    closeHTMLModal();
+                    closeDeviceInfoModal();
                     closeOTAModal();
                 }
             });
@@ -594,8 +582,8 @@
                         </div>
                         
                         <div class="actions">
-                            <button class="btn btn-html" onclick="showESP32HTML('${device.id}', '${device.name}', '${ipAddress}')">
-                                <i class="fas fa-external-link-alt"></i> [HTML]
+                            <button class="btn btn-html" onclick="showDeviceInfo('${device.id}', '${device.name}', '${ipAddress}')">
+                                <i class="fas fa-external-link-alt"></i> [BİLGİ]
                             </button>
                             <button class="btn btn-ota" onclick="openOTAModal('${device.id}', '${device.name}')" ${isOTAActive ? 'disabled' : ''}>
                                 ${isOTAActive ? '<i class="fas fa-sync-alt fa-spin"></i> OTA' : '<i class="fas fa-upload"></i> OTA'}
@@ -609,18 +597,89 @@
             container.innerHTML = html;
         }
         
-        // ESP32 HTML sayfasını göster
-        function showESP32HTML(deviceId, deviceName, ipAddress) {
-            // Modal içeriğini güncelle
-            document.getElementById('modalDeviceName').textContent = `${deviceName} (${deviceId})`;
+        // Cihaz bilgilerini göster
+        async function showDeviceInfo(deviceId, deviceName, ipAddress) {
+            document.getElementById('modalDeviceName').textContent = deviceName;
+            document.getElementById('deviceInfoModal').style.display = 'block';
             
-            // Iframe URL'sini ayarla (reverse proxy ile)
-            const proxyUrl = `/device/${deviceId}/html`;
-            currentIframeUrl = proxyUrl;
-            document.getElementById('esp32Iframe').src = proxyUrl;
-            
-            // Modal'ı göster
-            document.getElementById('htmlModal').style.display = 'flex';
+            try {
+                const response = await fetch(`/api/device/proxy-status/${deviceId}`);
+                const data = await response.json();
+                
+                let html = '<div class="device-info">';
+                html += '<h3>📊 Cihaz Bilgileri</h3>';
+                html += `<p><strong>Cihaz:</strong> ${data.deviceName || deviceName}</p>`;
+                html += `<p><strong>ID:</strong> ${data.deviceId || deviceId}</p>`;
+                html += `<p><strong>IP:</strong> ${data.ipAddress || ipAddress}</p>`;
+                html += `<p><strong>Durum:</strong> ${data.online ? '🟢 Çevrimiçi' : '🔴 Çevrimdışı'}</p>`;
+                
+                if (data.temperature !== undefined) {
+                    html += `<p><strong>Sıcaklık:</strong> ${data.temperature.toFixed(1)}°C</p>`;
+                }
+                
+                if (data.ledState !== undefined) {
+                    html += `<p><strong>LED:</strong> ${data.ledState ? '🟢 Açık' : '🔴 Kapalı'}</p>`;
+                }
+                
+                if (data.freeHeap !== undefined) {
+                    html += `<p><strong>Boş RAM:</strong> ${data.freeHeap} bytes</p>`;
+                }
+                
+                if (data.uptime !== undefined) {
+                    const hours = Math.floor(data.uptime / 3600);
+                    const minutes = Math.floor((data.uptime % 3600) / 60);
+                    html += `<p><strong>Çalışma Süresi:</strong> ${hours} saat ${minutes} dakika</p>`;
+                }
+                
+                if (data.rssi !== undefined) {
+                    html += `<p><strong>WiFi Sinyali:</strong> ${data.rssi} dBm</p>`;
+                }
+                
+                html += '</div>';
+                
+                html += '<div class="device-info">';
+                html += '<h3>🔗 Hızlı Erişim</h3>';
+                html += `<button onclick="window.open('http://${data.ipAddress || ipAddress}', '_blank')" 
+                        ${!data.ipAddress && ipAddress === 'IP Yok' ? 'disabled' : ''}
+                        class="btn btn-html" style="margin: 5px;">
+                    <i class="fas fa-external-link-alt"></i> Yerel Arayüz
+                </button>`;
+                html += `<button onclick="window.open('http://${data.ipAddress || ipAddress}/temperature', '_blank')" 
+                        ${!data.ipAddress && ipAddress === 'IP Yok' ? 'disabled' : ''}
+                        class="btn btn-html" style="margin: 5px;">
+                    🌡️ Sıcaklık
+                </button>`;
+                html += `<button onclick="window.open('http://${data.ipAddress || ipAddress}/api/status', '_blank')" 
+                        ${!data.ipAddress && ipAddress === 'IP Yok' ? 'disabled' : ''}
+                        class="btn btn-html" style="margin: 5px;">
+                    📊 JSON API
+                </button>`;
+                html += `<button onclick="window.open('/device/${deviceId}/html', '_blank')" 
+                        class="btn btn-html" style="margin: 5px;">
+                    📋 Dashboard Bilgisi
+                </button>`;
+                html += '</div>';
+                
+                document.getElementById('deviceInfoContent').innerHTML = html;
+                
+            } catch (error) {
+                document.getElementById('deviceInfoContent').innerHTML = `
+                    <div class="error">
+                        <h3>❌ Bağlantı Hatası</h3>
+                        <p>ESP32 cihazına bağlanılamadı.</p>
+                        <p>Hata: ${error.message}</p>
+                        <p>Yerel ağınızda ESP32'nin IP adresine doğrudan erişebilirsiniz:</p>
+                        <a href="http://${ipAddress}" target="_blank" class="btn btn-html" style="display: inline-block; margin-top: 10px;">
+                            http://${ipAddress}
+                        </a>
+                    </div>
+                `;
+            }
+        }
+        
+        // Cihaz bilgisi modal kapat
+        function closeDeviceInfoModal() {
+            document.getElementById('deviceInfoModal').style.display = 'none';
         }
         
         // OTA modal aç
@@ -774,37 +833,18 @@
             statusDiv.style.display = 'block';
         }
         
-        // Iframe'i yenile
-        function refreshIframe() {
-            const iframe = document.getElementById('esp32Iframe');
-            iframe.src = iframe.src;
-        }
-        
-        // Yeni sekmede aç
-        function openInNewTab() {
-            if (currentIframeUrl) {
-                window.open(currentIframeUrl, '_blank');
-            }
-        }
-        
-        // HTML modal kapat
-        function closeHTMLModal() {
-            document.getElementById('htmlModal').style.display = 'none';
-            document.getElementById('esp32Iframe').src = '';
-        }
-        
         // Modal dışına tıklayarak kapatma
-        document.getElementById('htmlModal').addEventListener('click', function(event) {
-            if (event.target === this) {
-                closeHTMLModal();
+        window.onclick = function(event) {
+            const deviceInfoModal = document.getElementById('deviceInfoModal');
+            const otaModal = document.getElementById('otaModal');
+            
+            if (event.target === deviceInfoModal) {
+                closeDeviceInfoModal();
             }
-        });
-        
-        document.getElementById('otaModal').addEventListener('click', function(event) {
-            if (event.target === this) {
+            if (event.target === otaModal) {
                 closeOTAModal();
             }
-        });
+        };
     </script>
 </body>
 </html>
