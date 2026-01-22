@@ -363,6 +363,167 @@ app.get('/device/:deviceId/local', async (req, res) => {
     }
 });
 
+// /device/:id/html endpoint'i - ESP32'nin kendi HTML sayfasını göster
+app.get('/device/:deviceId/html', async (req, res) => {
+    const deviceId = req.params.deviceId;
+    const device = devices.find(d => d.id === deviceId);
+    
+    if (!device) {
+        return res.status(404).json({ error: 'Cihaz bulunamadı' });
+    }
+    
+    const deviceState = deviceStates[deviceId] || {};
+    const deviceIp = deviceState.ipAddress;
+    
+    if (!deviceIp) {
+        return res.status(400).json({ 
+            error: 'Cihaz IP adresi bilinmiyor',
+            deviceId: deviceId
+        });
+    }
+    
+    try {
+        // ESP32'nin ana sayfasına proxy yap
+        const targetUrl = `http://${deviceIp}/`;
+        
+        // HTTP isteği yap
+        return new Promise((resolve, reject) => {
+            const options = {
+                hostname: deviceIp,
+                port: 80,
+                path: '/',
+                method: 'GET',
+                timeout: 8000,
+                headers: {
+                    'User-Agent': 'ESP32-Dashboard-Proxy/1.0',
+                    'Accept': 'text/html'
+                }
+            };
+            
+            const proxyReq = http.request(options, (proxyRes) => {
+                let htmlContent = '';
+                
+                proxyRes.on('data', (chunk) => {
+                    htmlContent += chunk;
+                });
+                
+                proxyRes.on('end', () => {
+                    // HTML içeriğini değiştir (base URL'leri düzelt)
+                    let modifiedHtml = htmlContent
+                        .replace(/href="\//g, `href="/device/${deviceId}/html/`)
+                        .replace(/src="\//g, `src="/device/${deviceId}/html/`)
+                        .replace(/action="\//g, `action="/device/${deviceId}/html/`);
+                    
+                    // Dashboard linkini değiştir
+                    modifiedHtml = modifiedHtml.replace(
+                        /href="https:\/\/satwebconnect\.onrender\.com\/dashboard"/g,
+                        'href="/dashboard" target="_blank"'
+                    );
+                    
+                    res.setHeader('Content-Type', 'text/html');
+                    res.setHeader('Access-Control-Allow-Origin', '*');
+                    res.send(modifiedHtml);
+                    resolve();
+                });
+            });
+            
+            proxyReq.on('error', (err) => {
+                console.error('HTML proxy error:', err);
+                // Fallback HTML
+                res.send(`
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <title>${device.name} - ESP32 HTML</title>
+                        <style>
+                            body { font-family: Arial; padding: 40px; text-align: center; }
+                            .error { background: #ffebee; color: #c62828; padding: 20px; border-radius: 8px; }
+                            .btn { padding: 10px 20px; background: #2196F3; color: white; text-decoration: none; border-radius: 5px; margin: 10px; }
+                        </style>
+                    </head>
+                    <body>
+                        <h1>${device.name} - ESP32 Kontrol Paneli</h1>
+                        <div class="error">
+                            <h3>❌ ESP32 Bağlantı Hatası</h3>
+                            <p>ESP32 cihazına bağlanılamadı: ${err.message}</p>
+                            <p><strong>IP:</strong> ${deviceIp}</p>
+                        </div>
+                        <div>
+                            <a href="http://${deviceIp}" class="btn" target="_blank">Doğrudan Erişim</a>
+                            <a href="/device/${deviceId}" class="btn">Dashboard Detay</a>
+                            <a href="/dashboard" class="btn">Dashboard'a Dön</a>
+                        </div>
+                    </body>
+                    </html>
+                `);
+                resolve();
+            });
+            
+            proxyReq.on('timeout', () => {
+                console.error('HTML proxy timeout');
+                proxyReq.destroy();
+                res.send(`
+                    <!DOCTYPE html>
+                    <html>
+                    <head><title>Timeout</title></head>
+                    <body style="padding:40px;text-align:center;">
+                        <h1>⏳ Zaman Aşımı</h1>
+                        <p>ESP32 cihazına bağlanırken zaman aşımı oluştu.</p>
+                        <p><a href="/device/${deviceId}">Dashboard detay sayfasına dön</a></p>
+                    </body>
+                    </html>
+                `);
+                resolve();
+            });
+            
+            proxyReq.end();
+        });
+        
+    } catch (error) {
+        console.error('HTML endpoint error:', error);
+        res.status(500).json({ 
+            error: 'Internal server error',
+            message: error.message
+        });
+    }
+});
+
+// /device/:id/html/ altındaki tüm yollar için proxy
+app.all('/device/:deviceId/html/*', async (req, res) => {
+    const deviceId = req.params.deviceId;
+    const device = devices.find(d => d.id === deviceId);
+    
+    if (!device) {
+        return res.status(404).json({ error: 'Cihaz bulunamadı' });
+    }
+    
+    const deviceState = deviceStates[deviceId] || {};
+    const deviceIp = deviceState.ipAddress;
+    
+    if (!deviceIp) {
+        return res.status(400).json({ 
+            error: 'Cihaz IP adresi bilinmiyor',
+            deviceId: deviceId
+        });
+    }
+    
+    const originalPath = req.params[0] || '';
+    const queryString = req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : '';
+    const targetPath = '/' + originalPath + queryString;
+    
+    console.log(`📄 HTML Proxy: ${deviceIp}${targetPath}`);
+    
+    try {
+        await proxyESP32Local(deviceIp, req, res);
+    } catch (error) {
+        console.error('HTML proxy error:', error);
+        res.status(502).json({ 
+            error: 'ESP32 bağlantı hatası',
+            message: error.message
+        });
+    }
+});
+
 // ESP32 Device Info Proxy
 app.get('/api/device/proxy-status/:deviceId', async (req, res) => {
     const deviceId = req.params.deviceId;
@@ -1098,7 +1259,7 @@ app.use((req, res) => {
         path: req.path,
         method: req.method,
         timestamp: Date.now(),
-        suggestion: 'Geçerli endpointler: /, /dashboard, /debug, /api/*, /device/:id/*'
+        suggestion: 'Geçerli endpointler: /, /dashboard, /debug, /api/*, /device/:id/*, /device/:id/html'
     });
 });
 
@@ -1115,6 +1276,7 @@ app.listen(PORT, () => {
 🔧 Debug: http://localhost:${PORT}/debug
 📡 API: http://localhost:${PORT}/api/devices
 🏠 ESP32 Yerel Arayüz: http://localhost:${PORT}/device/:id/local
+📄 ESP32 HTML: http://localhost:${PORT}/device/:id/html
 ⚡ OTA: http://localhost:${PORT}/api/ota
 ❤️  Health: http://localhost:${PORT}/health
 ========================================
