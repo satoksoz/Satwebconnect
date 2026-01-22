@@ -1,3 +1,5 @@
+[file name]: dashboard.html
+[file content begin]
 <!DOCTYPE html>
 <html>
 <head>
@@ -53,7 +55,7 @@
         
         .devices-grid { 
             display: grid; 
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); 
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); 
             gap: 20px; 
             margin-top: 20px;
         }
@@ -138,10 +140,13 @@
             align-items: center;
             justify-content: center;
             gap: 8px;
+            text-decoration: none;
+            text-align: center;
         }
         
         .btn-html { background: #2196F3; }
         .btn-ota { background: #FF9800; }
+        .btn-details { background: #4CAF50; }
         
         .btn:hover { opacity: 0.9; }
         
@@ -192,8 +197,37 @@
             margin-top: 5px;
         }
         
-        /* OTA Modal */
-        .ota-modal {
+        .device-info-row {
+            display: flex;
+            gap: 10px;
+            margin: 10px 0;
+            flex-wrap: wrap;
+        }
+        
+        .info-item {
+            background: #e8f5e9;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .info-item.temp {
+            background: #ffe0e0;
+        }
+        
+        .info-item.led {
+            background: #fff3e0;
+        }
+        
+        .info-item.ip {
+            background: #e3f2fd;
+        }
+        
+        /* ESP32 HTML Modal */
+        .html-modal {
             display: none;
             position: fixed;
             top: 0;
@@ -208,160 +242,72 @@
         
         .modal-content {
             background: white;
-            padding: 30px;
+            width: 95%;
+            height: 95%;
             border-radius: 15px;
-            width: 90%;
-            max-width: 400px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
         }
         
         .modal-header {
+            padding: 20px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #ddd;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 20px;
         }
         
         .modal-title {
-            font-size: 20px;
+            font-size: 18px;
             color: #333;
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
         
         .close-modal {
             cursor: pointer;
             font-size: 24px;
             color: #666;
+            padding: 5px;
         }
         
-        .file-input {
+        .modal-body {
+            flex: 1;
+            position: relative;
+        }
+        
+        .modal-iframe {
             width: 100%;
-            padding: 20px;
-            border: 2px dashed #FF9800;
-            border-radius: 10px;
-            margin: 20px 0;
-            text-align: center;
-            cursor: pointer;
-            background: #FFF3E0;
+            height: 100%;
+            border: none;
         }
         
-        .file-input:hover {
-            background: #FFECB3;
-        }
-        
-        .file-input.has-file {
-            background: #E8F5E9;
-            border-color: #4CAF50;
+        .modal-actions {
+            padding: 15px;
+            background: #f8f9fa;
+            border-top: 1px solid #ddd;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
         }
         
         .modal-btn {
-            width: 100%;
-            padding: 15px;
-            color: white;
-            border: none;
-            border-radius: 10px;
-            cursor: pointer;
-            font-size: 16px;
-            font-weight: bold;
-            margin-top: 10px;
-        }
-        
-        .modal-btn:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-        }
-        
-        .btn-upload {
+            padding: 8px 16px;
             background: #2196F3;
-        }
-        
-        .btn-start {
-            background: #4CAF50;
-        }
-        
-        .btn-check {
-            background: #FF9800;
-        }
-        
-        .btn-delete {
-            background: #f44336;
-        }
-        
-        .btn-cancel {
-            background: #757575;
-        }
-        
-        .progress-container {
-            display: none;
-            margin: 20px 0;
-        }
-        
-        .progress-bar {
-            width: 100%;
-            height: 20px;
-            background: #e0e0e0;
-            border-radius: 10px;
-            overflow: hidden;
-            margin: 10px 0;
-        }
-        
-        .progress-fill {
-            height: 100%;
-            background: #4CAF50;
-            width: 0%;
-            transition: width 0.3s;
-        }
-        
-        .progress-text {
-            text-align: center;
-            font-weight: bold;
-            color: #333;
-        }
-        
-        .success-message {
-            display: none;
-            background: #E8F5E9;
-            padding: 15px;
-            border-radius: 10px;
-            margin: 10px 0;
-            color: #2E7D32;
-            text-align: center;
-        }
-        
-        .error-message {
-            display: none;
-            background: #FFEBEE;
-            padding: 15px;
-            border-radius: 10px;
-            margin: 10px 0;
-            color: #C62828;
-            text-align: center;
-        }
-        
-        .file-actions {
-            display: flex;
-            gap: 10px;
-            margin-top: 10px;
-        }
-        
-        .file-action-btn {
-            flex: 1;
-            padding: 8px;
+            color: white;
             border: none;
             border-radius: 5px;
-            color: white;
             cursor: pointer;
-            font-size: 14px;
             display: flex;
             align-items: center;
-            justify-content: center;
             gap: 5px;
         }
         
-        .btn-view {
-            background: #2196F3;
-        }
-        
-        .btn-delete-small {
-            background: #f44336;
+        .modal-btn:hover {
+            opacity: 0.9;
         }
     </style>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
@@ -381,6 +327,10 @@
                     <div class="stat-num" id="ota-count">0</div>
                     <div class="stat-label">AKTİF OTA</div>
                 </div>
+                <div class="stat" onclick="window.open('/debug', '_blank')">
+                    <div class="stat-num"><i class="fas fa-bug"></i></div>
+                    <div class="stat-label">DEBUG</div>
+                </div>
             </div>
             
             <div style="margin-top: 15px;">
@@ -389,6 +339,9 @@
                 </button>
                 <button onclick="window.open('/debug', '_blank')" style="padding: 10px 20px; background: #FF9800; color: white; border: none; border-radius: 5px; cursor: pointer; margin-left: 10px;">
                     <i class="fas fa-bug"></i> Debug
+                </button>
+                <button onclick="window.open('/', '_blank')" style="padding: 10px 20px; background: #2196F3; color: white; border: none; border-radius: 5px; cursor: pointer; margin-left: 10px;">
+                    <i class="fas fa-home"></i> Ana Sayfa
                 </button>
             </div>
         </div>
@@ -412,98 +365,55 @@
         <i class="fas fa-sync-alt"></i>
     </div>
     
-    <!-- OTA Modal -->
-    <div id="otaModal" class="ota-modal">
+    <!-- ESP32 HTML Modal -->
+    <div id="htmlModal" class="html-modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h2 class="modal-title"><i class="fas fa-upload"></i> OTA Güncelleme</h2>
-                <span class="close-modal" onclick="closeOTA()">×</span>
-            </div>
-            
-            <p><strong>Cihaz:</strong> <span id="otaDeviceName">-</span></p>
-            <p><strong>ID:</strong> <span id="otaDeviceId">-</span></p>
-            
-            <div class="success-message" id="successMessage">
-                <i class="fas fa-check-circle"></i> <span id="successText"></span>
-            </div>
-            
-            <div class="error-message" id="errorMessage">
-                <i class="fas fa-exclamation-circle"></i> <span id="errorText"></span>
-            </div>
-            
-            <div class="file-input" onclick="document.getElementById('otaFile').click()" id="fileDropArea">
-                <i class="fas fa-cloud-upload-alt fa-2x"></i>
-                <p style="margin: 10px 0;" id="fileDropText">Firmware dosyası seç</p>
-                <p style="font-size: 12px; color: #666;">.bin uzantılı dosyalar</p>
-                <input type="file" id="otaFile" accept=".bin" style="display: none;">
-            </div>
-            
-            <div id="fileInfo" style="display: none; background: #E8F5E9; padding: 15px; border-radius: 10px; margin: 10px 0;">
-                <p><strong>✓ Dosya seçildi:</strong> <span id="fileName">-</span></p>
-                <p><strong>Boyut:</strong> <span id="fileSize">-</span></p>
-                <div class="file-actions">
-                    <button class="file-action-btn btn-view" onclick="viewFileInfo()">
-                        <i class="fas fa-info-circle"></i> Detay
-                    </button>
-                    <button class="file-action-btn btn-delete-small" onclick="deleteSelectedFile()">
-                        <i class="fas fa-trash"></i> Sil
-                    </button>
+                <div class="modal-title">
+                    <i class="fas fa-external-link-alt"></i>
+                    <span id="modalDeviceName">ESP32 Arayüzü</span>
+                    <span id="modalDeviceIp" style="font-size: 12px; color: #666; margin-left: 10px;"></span>
                 </div>
+                <span class="close-modal" onclick="closeHTMLModal()">×</span>
             </div>
             
-            <div id="existingFileInfo" style="display: none; background: #FFF3E0; padding: 15px; border-radius: 10px; margin: 10px 0;">
-                <p><strong>📁 Mevcut Dosya:</strong> <span id="existingFileName">-</span></p>
-                <p><strong>Boyut:</strong> <span id="existingFileSize">-</span></p>
-                <div class="file-actions">
-                    <button class="file-action-btn btn-view" onclick="downloadExistingFile()">
-                        <i class="fas fa-download"></i> İndir
-                    </button>
-                    <button class="file-action-btn btn-delete-small" onclick="deleteExistingFile()">
-                        <i class="fas fa-trash"></i> Sil
-                    </button>
-                </div>
+            <div class="modal-body">
+                <iframe id="esp32Iframe" class="modal-iframe" src="" title="ESP32 Arayüzü"></iframe>
             </div>
             
-            <div class="progress-container" id="progressContainer">
-                <div class="progress-bar">
-                    <div class="progress-fill" id="progressFill"></div>
-                </div>
-                <div class="progress-text" id="progressText">%0</div>
+            <div class="modal-actions">
+                <button class="modal-btn" onclick="refreshIframe()">
+                    <i class="fas fa-sync-alt"></i> Yenile
+                </button>
+                <button class="modal-btn" onclick="openInNewTab()">
+                    <i class="fas fa-external-link-alt"></i> Yeni Sekmede Aç
+                </button>
+                <button class="modal-btn" onclick="closeHTMLModal()" style="background: #757575;">
+                    <i class="fas fa-times"></i> Kapat
+                </button>
             </div>
-            
-            <button class="modal-btn btn-upload" onclick="uploadFirmware()" id="uploadBtn" disabled>
-                <i class="fas fa-upload"></i> Dosyayı Yükle
-            </button>
-            
-            <button class="modal-btn btn-start" onclick="startOTA()" id="startBtn" style="display: none;">
-                <i class="fas fa-play"></i> OTA Başlat
-            </button>
-            
-            <button class="modal-btn btn-check" onclick="checkOTAStatus()" id="checkBtn" style="display: none;">
-                <i class="fas fa-sync-alt"></i> OTA Durumunu Kontrol Et
-            </button>
-            
-            <button class="modal-btn btn-cancel" onclick="closeOTA()" style="margin-top: 10px;">
-                <i class="fas fa-times"></i> Kapat
-            </button>
         </div>
     </div>
     
     <script>
         let devices = [];
         let selectedDevice = null;
-        let selectedFile = null;
-        let otaCheckInterval = null;
-        let currentOTAStatus = null;
-        let existingFirmwareFile = null;
+        let currentIframeUrl = '';
         
         // Sayfa yüklendiğinde çalıştır
         document.addEventListener('DOMContentLoaded', function() {
             console.log('🚀 Dashboard yüklendi');
-            loadDevices(); // Sayfa açılır açılmaz yükle
+            loadDevices();
             
-            // Her 5 saniyede bir otomatik yenile
-            setInterval(loadDevices, 5000);
+            // Her 10 saniyede bir otomatik yenile
+            setInterval(loadDevices, 10000);
+            
+            // ESC tuşu ile modal kapatma
+            document.addEventListener('keydown', function(event) {
+                if (event.key === 'Escape') {
+                    closeHTMLModal();
+                }
+            });
         });
         
         // Cihazları yükle
@@ -512,11 +422,6 @@
                 const response = await fetch('/api/devices');
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                
-                const contentType = response.headers.get("content-type");
-                if (!contentType || !contentType.includes("application/json")) {
-                    throw new Error('Server JSON dönmedi');
                 }
                 
                 devices = await response.json();
@@ -581,6 +486,9 @@
                 const isOTAActive = device.otaActive || false;
                 const otaProgress = device.otaProgress || 0;
                 const hasFirmware = device.hasFirmware || false;
+                const temperature = device.temperature || 25.0;
+                const ledState = device.ledState || false;
+                const ipAddress = device.ipAddress || 'IP Yok';
                 
                 html += `
                     <div class="device-card ${isOTAActive ? 'ota-active' : ''}">
@@ -592,6 +500,21 @@
                         </div>
                         
                         <div class="device-id">${device.id}</div>
+                        
+                        <div class="device-info-row">
+                            <div class="info-item temp" title="Sıcaklık">
+                                <i class="fas fa-thermometer-half"></i>
+                                ${temperature.toFixed(1)}°C
+                            </div>
+                            <div class="info-item led" title="LED Durumu">
+                                <i class="fas fa-lightbulb" style="color: ${ledState ? '#4CAF50' : '#f44336'}"></i>
+                                ${ledState ? 'AÇIK' : 'KAPALI'}
+                            </div>
+                            <div class="info-item ip" title="IP Adresi">
+                                <i class="fas fa-network-wired"></i>
+                                ${ipAddress}
+                            </div>
+                        </div>
                         
                         ${hasFirmware ? `<div style="font-size: 12px; color: #4CAF50; margin: 5px 0;">
                             <i class="fas fa-check-circle"></i> Firmware hazır
@@ -611,11 +534,14 @@
                         </div>
                         
                         <div class="actions">
-                            <button class="btn btn-html" onclick="openHTML('${device.id}')">
-                                <i class="fas fa-globe"></i> HTML
+                            <button class="btn btn-html" onclick="showESP32HTML('${device.id}', '${device.name}', '${ipAddress}')">
+                                <i class="fas fa-external-link-alt"></i> HTML
+                            </button>
+                            <button class="btn btn-details" onclick="showDeviceDetails('${device.id}')">
+                                <i class="fas fa-info-circle"></i> Detay
                             </button>
                             <button class="btn btn-ota" onclick="openOTA('${device.id}', '${device.name}')" ${isOTAActive ? 'disabled' : ''}>
-                                ${isOTAActive ? '<i class="fas fa-sync-alt fa-spin"></i> OTA DEVAM' : '<i class="fas fa-upload"></i> OTA'}
+                                ${isOTAActive ? '<i class="fas fa-sync-alt fa-spin"></i> OTA' : '<i class="fas fa-upload"></i> OTA'}
                             </button>
                         </div>
                     </div>
@@ -626,387 +552,57 @@
             container.innerHTML = html;
         }
         
-        // HTML aç - CİHAZ DETAY SAYFASI
-        function openHTML(deviceId) {
+        // ESP32 HTML sayfasını göster
+        function showESP32HTML(deviceId, deviceName, ipAddress) {
+            selectedDevice = { id: deviceId, name: deviceName, ip: ipAddress };
+            
+            // Modal içeriğini güncelle
+            document.getElementById('modalDeviceName').textContent = deviceName;
+            document.getElementById('modalDeviceIp').textContent = ipAddress !== 'IP Yok' ? `(${ipAddress})` : '';
+            
+            // Iframe URL'sini ayarla (reverse proxy ile)
+            const proxyUrl = `/device/${deviceId}/html`;
+            currentIframeUrl = proxyUrl;
+            document.getElementById('esp32Iframe').src = proxyUrl;
+            
+            // Modal'ı göster
+            document.getElementById('htmlModal').style.display = 'flex';
+        }
+        
+        // Cihaz detay sayfasını aç
+        function showDeviceDetails(deviceId) {
             window.open(`/device/${deviceId}`, '_blank');
         }
         
-        // OTA aç
-        async function openOTA(deviceId, deviceName) {
-            selectedDevice = deviceId;
-            selectedFile = null;
-            
-            document.getElementById('otaDeviceName').textContent = deviceName;
-            document.getElementById('otaDeviceId').textContent = deviceId;
-            document.getElementById('fileInfo').style.display = 'none';
-            document.getElementById('existingFileInfo').style.display = 'none';
-            document.getElementById('uploadBtn').disabled = true;
-            document.getElementById('startBtn').style.display = 'none';
-            document.getElementById('checkBtn').style.display = 'none';
-            document.getElementById('progressContainer').style.display = 'none';
-            document.getElementById('successMessage').style.display = 'none';
-            document.getElementById('errorMessage').style.display = 'none';
-            document.getElementById('otaFile').value = '';
-            document.getElementById('fileDropArea').className = 'file-input';
-            document.getElementById('fileDropText').textContent = 'Firmware dosyası seç';
-            
-            document.getElementById('otaModal').style.display = 'flex';
-            
-            // OTA durumunu kontrol et
-            await checkOTAStatus();
+        // OTA modal aç (mevcut OTA işlevselliği)
+        function openOTA(deviceId, deviceName) {
+            alert(`OTA güncellemesi başlatılacak: ${deviceName}\n\nBu özellik şu anda aktif değil.`);
         }
         
-        // OTA kapat
-        function closeOTA() {
-            document.getElementById('otaModal').style.display = 'none';
-            document.getElementById('otaFile').value = '';
+        // Iframe'i yenile
+        function refreshIframe() {
+            const iframe = document.getElementById('esp32Iframe');
+            iframe.src = iframe.src;
+        }
+        
+        // Yeni sekmede aç
+        function openInNewTab() {
+            if (selectedDevice && selectedDevice.ip !== 'IP Yok') {
+                window.open(currentIframeUrl, '_blank');
+            }
+        }
+        
+        // HTML modal kapat
+        function closeHTMLModal() {
+            document.getElementById('htmlModal').style.display = 'none';
+            document.getElementById('esp32Iframe').src = '';
             selectedDevice = null;
-            selectedFile = null;
-            existingFirmwareFile = null;
-            
-            if (otaCheckInterval) {
-                clearInterval(otaCheckInterval);
-                otaCheckInterval = null;
-            }
-            
-            // Cihazları yenile
-            loadDevices();
         }
-        
-        // OTA durumunu kontrol et
-        async function checkOTAStatus() {
-            if (!selectedDevice) return;
-            
-            try {
-                const response = await fetch(`/api/ota/status/${selectedDevice}`);
-                currentOTAStatus = await response.json();
-                
-                console.log('OTA Status:', currentOTAStatus);
-                
-                if (currentOTAStatus.hasFile) {
-                    existingFirmwareFile = currentOTAStatus;
-                    
-                    // Mevcut dosya bilgilerini göster
-                    document.getElementById('existingFileInfo').style.display = 'block';
-                    document.getElementById('existingFileName').textContent = currentOTAStatus.filename;
-                    document.getElementById('existingFileSize').textContent = formatBytes(currentOTAStatus.size);
-                    
-                    // Sadece OTA aktif DEĞİLSE start butonunu göster
-                    if (!currentOTAStatus.active) {
-                        document.getElementById('startBtn').style.display = 'block';
-                        document.getElementById('startBtn').disabled = false;
-                        document.getElementById('startBtn').innerHTML = '<i class="fas fa-play"></i> OTA Başlat';
-                    }
-                    
-                    document.getElementById('uploadBtn').style.display = 'none';
-                    document.getElementById('checkBtn').style.display = 'none';
-                    
-                    showSuccess(`✅ Mevcut firmware: ${currentOTAStatus.filename}`);
-                    
-                } else {
-                    existingFirmwareFile = null;
-                    document.getElementById('existingFileInfo').style.display = 'none';
-                    document.getElementById('startBtn').style.display = 'none';
-                    document.getElementById('uploadBtn').style.display = 'block';
-                    document.getElementById('checkBtn').style.display = 'none';
-                }
-                
-            } catch (error) {
-                console.error('OTA status hatası:', error);
-                showError('OTA durumu kontrol edilemedi: ' + error.message);
-            }
-        }
-        
-        // Dosya seçildiğinde
-        document.getElementById('otaFile').addEventListener('change', function(e) {
-            if (e.target.files.length > 0) {
-                selectedFile = e.target.files[0];
-                
-                // Dosya uzantısı kontrolü
-                if (!selectedFile.name.toLowerCase().endsWith('.bin')) {
-                    showError('Sadece .bin uzantılı dosyalar yüklenebilir!');
-                    selectedFile = null;
-                    e.target.value = '';
-                    return;
-                }
-                
-                // Dosya boyutu kontrolü (max 10MB)
-                if (selectedFile.size > 10 * 1024 * 1024) {
-                    showError('Dosya boyutu 10MB\'dan küçük olmalıdır!');
-                    selectedFile = null;
-                    e.target.value = '';
-                    return;
-                }
-                
-                // Dosya bilgilerini göster
-                document.getElementById('fileName').textContent = selectedFile.name;
-                document.getElementById('fileSize').textContent = formatBytes(selectedFile.size);
-                document.getElementById('fileInfo').style.display = 'block';
-                document.getElementById('uploadBtn').disabled = false;
-                document.getElementById('fileDropArea').className = 'file-input has-file';
-                document.getElementById('fileDropText').textContent = 'Yeni dosya seçildi';
-                
-                // Hata/success mesajlarını temizle
-                document.getElementById('successMessage').style.display = 'none';
-                document.getElementById('errorMessage').style.display = 'none';
-                
-                // Mevcut dosya bilgisini gizle
-                document.getElementById('existingFileInfo').style.display = 'none';
-            }
-        });
-        
-        // Dosya boyutunu formatla
-        function formatBytes(bytes) {
-            if (bytes === 0) return '0 Bytes';
-            const k = 1024;
-            const sizes = ['Bytes', 'KB', 'MB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-        }
-        
-        // Success mesajı göster
-        function showSuccess(message) {
-            document.getElementById('successText').textContent = message;
-            document.getElementById('successMessage').style.display = 'block';
-            document.getElementById('errorMessage').style.display = 'none';
-        }
-        
-        // Error mesajı göster
-        function showError(message) {
-            document.getElementById('errorText').textContent = message;
-            document.getElementById('errorMessage').style.display = 'block';
-            document.getElementById('successMessage').style.display = 'none';
-        }
-        
-        // Dosya detaylarını göster
-        function viewFileInfo() {
-            if (selectedFile) {
-                alert(`Dosya Bilgisi:\n\nAd: ${selectedFile.name}\nBoyut: ${formatBytes(selectedFile.size)}\nTür: ${selectedFile.type || 'Binary'}`);
-            }
-        }
-        
-        // Seçili dosyayı sil
-        function deleteSelectedFile() {
-            if (confirm('Seçili dosyayı silmek istediğinize emin misiniz?')) {
-                document.getElementById('otaFile').value = '';
-                document.getElementById('fileInfo').style.display = 'none';
-                document.getElementById('uploadBtn').disabled = true;
-                selectedFile = null;
-                document.getElementById('fileDropArea').className = 'file-input';
-                document.getElementById('fileDropText').textContent = 'Firmware dosyası seç';
-                
-                // Mevcut dosya varsa göster
-                if (existingFirmwareFile) {
-                    document.getElementById('existingFileInfo').style.display = 'block';
-                }
-            }
-        }
-        
-        // Mevcut dosyayı indir
-        function downloadExistingFile() {
-            if (existingFirmwareFile) {
-                window.open(`/api/ota/download/${selectedDevice}`, '_blank');
-            }
-        }
-        
-        // Mevcut dosyayı sil
-        async function deleteExistingFile() {
-            if (!selectedDevice || !existingFirmwareFile) return;
-            
-            if (confirm(`"${existingFirmwareFile.filename}" dosyasını silmek istediğinize emin misiniz?\n\nBu işlem geri alınamaz.`)) {
-                try {
-                    const response = await fetch('/api/ota/cancel', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            deviceId: selectedDevice
-                        })
-                    });
-                    
-                    const result = await response.json();
-                    
-                    if (result.success) {
-                        showSuccess('✅ Firmware dosyası silindi.');
-                        existingFirmwareFile = null;
-                        document.getElementById('existingFileInfo').style.display = 'none';
-                        document.getElementById('startBtn').style.display = 'none';
-                        document.getElementById('uploadBtn').style.display = 'block';
-                    } else {
-                        showError('❌ Dosya silinemedi: ' + (result.error || 'Bilinmeyen hata'));
-                    }
-                } catch (error) {
-                    showError('❌ Hata: ' + error.message);
-                }
-            }
-        }
-        
-        // Firmware dosyasını yükle
-        async function uploadFirmware() {
-            if (!selectedDevice || !selectedFile) {
-                showError('Cihaz ve dosya seçin!');
-                return;
-            }
-            
-            const formData = new FormData();
-            formData.append('firmware', selectedFile);
-            formData.append('deviceId', selectedDevice);
-            
-            try {
-                document.getElementById('uploadBtn').disabled = true;
-                document.getElementById('uploadBtn').innerHTML = '<i class="fas fa-spinner fa-spin"></i> Yükleniyor...';
-                
-                const response = await fetch('/api/ota/upload', {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                const result = await response.json();
-                
-                if (result.success) {
-                    showSuccess('✅ Firmware dosyası yüklendi! OTA başlatmak için "OTA Başlat" butonuna tıklayın.');
-                    
-                    // OTA durumunu kontrol et
-                    await checkOTAStatus();
-                    
-                    document.getElementById('uploadBtn').style.display = 'none';
-                    document.getElementById('fileInfo').style.display = 'none';
-                    selectedFile = null;
-                    document.getElementById('otaFile').value = '';
-                    
-                } else {
-                    showError('❌ Dosya yüklenemedi: ' + (result.error || 'Bilinmeyen hata'));
-                    document.getElementById('uploadBtn').disabled = false;
-                    document.getElementById('uploadBtn').innerHTML = '<i class="fas fa-upload"></i> Dosyayı Yükle';
-                }
-                
-            } catch (error) {
-                console.error('Upload hatası:', error);
-                showError('❌ Hata: ' + error.message);
-                document.getElementById('uploadBtn').disabled = false;
-                document.getElementById('uploadBtn').innerHTML = '<i class="fas fa-upload"></i> Dosyayı Yükle';
-            }
-        }
-        
-        // OTA başlat
-        async function startOTA() {
-            if (!selectedDevice) {
-                showError('Cihaz seçilmedi!');
-                return;
-            }
-            
-            if (!confirm(`OTA güncellemesini başlatmak istediğinize emin misiniz?\n\nCihaz: ${selectedDevice}\nDosya: ${existingFirmwareFile?.filename || 'Bilinmiyor'}\n\nCihaz yeniden başlatılacaktır.`)) {
-                return;
-            }
-            
-            try {
-                document.getElementById('startBtn').disabled = true;
-                document.getElementById('startBtn').innerHTML = '<i class="fas fa-spinner fa-spin"></i> Başlatılıyor...';
-                
-                const response = await fetch('/api/ota/start', {
-                    method: 'POST',
-                    headers: { 
-                        'Content-Type': 'application/json' 
-                    },
-                    body: JSON.stringify({ 
-                        deviceId: selectedDevice 
-                    })
-                });
-                
-                const result = await response.json();
-                
-                if (result.success) {
-                    showSuccess('✅ OTA güncellemesi başlatıldı! ESP32 cihazı firmware\'i indirecek ve yükleyecek.');
-                    document.getElementById('progressContainer').style.display = 'block';
-                    
-                    // OTA progress'ini takip et
-                    startOTAProgress();
-                    
-                    document.getElementById('startBtn').style.display = 'none';
-                    document.getElementById('checkBtn').style.display = 'block';
-                    
-                } else {
-                    showError('❌ OTA başlatılamadı: ' + (result.error || 'Bilinmeyen hata'));
-                    document.getElementById('startBtn').disabled = false;
-                    document.getElementById('startBtn').innerHTML = '<i class="fas fa-play"></i> OTA Başlat';
-                }
-                
-            } catch (error) {
-                console.error('OTA hatası:', error);
-                showError('❌ Hata: ' + error.message);
-                document.getElementById('startBtn').disabled = false;
-                document.getElementById('startBtn').innerHTML = '<i class="fas fa-play"></i> OTA Başlat';
-            }
-        }
-        
-        // OTA progress'ini takip et
-        function startOTAProgress() {
-            let progress = 0;
-            
-            otaCheckInterval = setInterval(async () => {
-                try {
-                    const response = await fetch(`/api/ota/status/${selectedDevice}`);
-                    const status = await response.json();
-                    
-                    if (status.active) {
-                        progress = status.progress;
-                        document.getElementById('progressFill').style.width = progress + '%';
-                        document.getElementById('progressText').textContent = '%' + progress;
-                        
-                        // OTA tamamlandıysa
-                        if (progress >= 100) {
-                            clearInterval(otaCheckInterval);
-                            showSuccess('🎉 OTA güncellemesi tamamlandı! Cihaz yeniden başlatılıyor...');
-                            setTimeout(() => {
-                                closeOTA();
-                            }, 5000);
-                        }
-                    } else if (progress > 0 && progress < 100) {
-                        // OTA durdu veya hata oluştu
-                        clearInterval(otaCheckInterval);
-                        showError('⚠️ OTA durdu veya hata oluştu. Lütfen cihazı kontrol edin.');
-                        document.getElementById('checkBtn').style.display = 'block';
-                    }
-                } catch (error) {
-                    console.error('Progress takip hatası:', error);
-                }
-            }, 1000);
-        }
-        
-        // ESC tuşu ile modal kapatma
-        document.addEventListener('keydown', function(event) {
-            if (event.key === 'Escape') {
-                closeOTA();
-            }
-        });
         
         // Modal dışına tıklayarak kapatma
-        document.getElementById('otaModal').addEventListener('click', function(event) {
+        document.getElementById('htmlModal').addEventListener('click', function(event) {
             if (event.target === this) {
-                closeOTA();
-            }
-        });
-        
-        // Drag & drop için
-        const fileDropArea = document.getElementById('fileDropArea');
-        
-        fileDropArea.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            fileDropArea.style.background = '#FFECB3';
-        });
-        
-        fileDropArea.addEventListener('dragleave', () => {
-            fileDropArea.style.background = '';
-        });
-        
-        fileDropArea.addEventListener('drop', (e) => {
-            e.preventDefault();
-            fileDropArea.style.background = '';
-            
-            if (e.dataTransfer.files.length > 0) {
-                document.getElementById('otaFile').files = e.dataTransfer.files;
-                document.getElementById('otaFile').dispatchEvent(new Event('change'));
+                closeHTMLModal();
             }
         });
     </script>
