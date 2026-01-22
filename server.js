@@ -33,30 +33,72 @@ app.use((req, res, next) => {
 // Reverse Proxy için yardımcı fonksiyon
 async function proxyRequest(targetUrl, req, res) {
     return new Promise((resolve, reject) => {
-        const parsedUrl = new URL(targetUrl);
+        // URL'i parse et
+        let targetHostname, targetPort, targetPath;
+        
+        try {
+            const url = new URL(targetUrl);
+            targetHostname = url.hostname;
+            targetPort = url.port || 80;
+            targetPath = url.pathname + url.search;
+        } catch (error) {
+            // http:// ile başlamıyorsa ekle
+            if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
+                targetUrl = 'http://' + targetUrl;
+            }
+            const url = new URL(targetUrl);
+            targetHostname = url.hostname;
+            targetPort = url.port || 80;
+            targetPath = url.pathname + url.search;
+        }
+        
         const options = {
-            hostname: parsedUrl.hostname,
-            port: parsedUrl.port || 80,
-            path: parsedUrl.pathname + (parsedUrl.search || ''),
+            hostname: targetHostname,
+            port: targetPort,
+            path: targetPath,
             method: req.method,
             headers: {
                 ...req.headers,
-                host: parsedUrl.hostname,
+                host: targetHostname,
                 'x-forwarded-for': req.ip,
-                'x-forwarded-host': req.get('host')
-            }
+                'x-forwarded-host': req.get('host'),
+                'x-forwarded-proto': req.protocol
+            },
+            timeout: 10000
         };
 
         const proxyReq = http.request(options, (proxyRes) => {
             // Headers'ı kopyala
+            const headersToCopy = {};
             Object.keys(proxyRes.headers).forEach(key => {
-                // Bazı headers'ı değiştir
-                if (key.toLowerCase() !== 'content-length') {
-                    res.setHeader(key, proxyRes.headers[key]);
+                // Bazı headers'ı değiştir veya çıkar
+                const lowerKey = key.toLowerCase();
+                if (lowerKey === 'content-length') {
+                    // Content-Length'i yeniden hesapla
+                    return;
                 }
+                if (lowerKey === 'location') {
+                    // Location header'ını rewrite et
+                    const location = proxyRes.headers[key];
+                    if (location.startsWith('http://' + targetHostname)) {
+                        headersToCopy[key] = location.replace(
+                            `http://${targetHostname}`, 
+                            `${req.protocol}://${req.get('host')}/device/${req.params.deviceId}/local`
+                        );
+                    } else {
+                        headersToCopy[key] = location;
+                    }
+                    return;
+                }
+                headersToCopy[key] = proxyRes.headers[key];
             });
             
-            res.status(proxyRes.statusCode);
+            // CORS headers ekle
+            headersToCopy['Access-Control-Allow-Origin'] = '*';
+            headersToCopy['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
+            headersToCopy['Access-Control-Allow-Headers'] = 'Content-Type, Authorization';
+            
+            res.writeHead(proxyRes.statusCode, headersToCopy);
             
             // Stream veriyi
             proxyRes.pipe(res);
@@ -70,10 +112,130 @@ async function proxyRequest(targetUrl, req, res) {
             console.error('Proxy error:', err);
             reject(err);
         });
+        
+        proxyReq.on('timeout', () => {
+            console.error('Proxy timeout:', targetUrl);
+            proxyReq.destroy();
+            reject(new Error('Proxy timeout'));
+        });
 
         // Request body varsa gönder
         if (req.body && Object.keys(req.body).length > 0) {
             proxyReq.write(JSON.stringify(req.body));
+        }
+        
+        proxyReq.end();
+    });
+}
+
+// ESP32 Local Proxy için özel fonksiyon
+async function proxyESP32Local(deviceIp, req, res) {
+    return new Promise((resolve, reject) => {
+        const targetPath = req.params[0] || '';
+        const queryString = req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : '';
+        const fullPath = '/' + targetPath + queryString;
+        
+        console.log(`🔗 ESP32 Proxy: ${deviceIp}${fullPath}`);
+        
+        const options = {
+            hostname: deviceIp,
+            port: 80,
+            path: fullPath,
+            method: req.method,
+            headers: {
+                ...req.headers,
+                host: deviceIp,
+                'x-forwarded-for': req.ip,
+                'x-forwarded-host': req.get('host'),
+                'x-forwarded-proto': req.protocol,
+                'User-Agent': 'ESP32-Dashboard-Proxy/1.0'
+            },
+            timeout: 8000
+        };
+
+        const proxyReq = http.request(options, (proxyRes) => {
+            // Headers'ı kopyala
+            const headersToCopy = {};
+            Object.keys(proxyRes.headers).forEach(key => {
+                const lowerKey = key.toLowerCase();
+                
+                // Location header'ını rewrite et
+                if (lowerKey === 'location') {
+                    const location = proxyRes.headers[key];
+                    if (location.startsWith('http://' + deviceIp) || 
+                        location.startsWith('//' + deviceIp) ||
+                        location.startsWith('/')) {
+                        
+                        // Relative URL'leri absolute yap
+                        let newLocation;
+                        if (location.startsWith('http://' + deviceIp)) {
+                            newLocation = location.replace(
+                                `http://${deviceIp}`, 
+                                `/device/${req.params.deviceId}/local`
+                            );
+                        } else if (location.startsWith('//' + deviceIp)) {
+                            newLocation = location.replace(
+                                `//${deviceIp}`, 
+                                `/device/${req.params.deviceId}/local`
+                            );
+                        } else if (location.startsWith('/')) {
+                            newLocation = `/device/${req.params.deviceId}/local${location}`;
+                        } else {
+                            newLocation = location;
+                        }
+                        headersToCopy[key] = newLocation;
+                    } else {
+                        headersToCopy[key] = location;
+                    }
+                    return;
+                }
+                
+                // Content-Type koru
+                if (lowerKey === 'content-type') {
+                    headersToCopy[key] = proxyRes.headers[key];
+                    return;
+                }
+                
+                // Diğer headers
+                headersToCopy[key] = proxyRes.headers[key];
+            });
+            
+            // CORS headers ekle
+            headersToCopy['Access-Control-Allow-Origin'] = '*';
+            headersToCopy['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
+            headersToCopy['Access-Control-Allow-Headers'] = 'Content-Type, Authorization';
+            
+            res.writeHead(proxyRes.statusCode, headersToCopy);
+            
+            // Stream veriyi
+            proxyRes.pipe(res);
+            
+            proxyRes.on('end', () => {
+                resolve();
+            });
+        });
+
+        proxyReq.on('error', (err) => {
+            console.error('ESP32 Proxy error:', err);
+            reject(err);
+        });
+        
+        proxyReq.on('timeout', () => {
+            console.error('ESP32 Proxy timeout:', deviceIp);
+            proxyReq.destroy();
+            reject(new Error('ESP32 connection timeout'));
+        });
+
+        // Request body varsa gönder
+        if (req.body && Object.keys(req.body).length > 0 && req.method !== 'GET') {
+            if (typeof req.body === 'object') {
+                proxyReq.write(JSON.stringify(req.body));
+            } else {
+                proxyReq.write(req.body);
+            }
+        } else if (req.method === 'POST' || req.method === 'PUT') {
+            // Boş body için
+            proxyReq.write('');
         }
         
         proxyReq.end();
@@ -113,6 +275,94 @@ app.get('/dashboard', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
 });
 
+// ESP32 Yerel Arayüz Proxy
+app.all('/device/:deviceId/local/*', async (req, res) => {
+    const deviceId = req.params.deviceId;
+    const device = devices.find(d => d.id === deviceId);
+    
+    if (!device) {
+        return res.status(404).json({ error: 'Cihaz bulunamadı' });
+    }
+    
+    const deviceState = deviceStates[deviceId] || {};
+    const deviceIp = deviceState.ipAddress;
+    
+    if (!deviceIp) {
+        return res.status(400).json({ 
+            error: 'Cihaz IP adresi bilinmiyor',
+            deviceId: deviceId
+        });
+    }
+    
+    try {
+        await proxyESP32Local(deviceIp, req, res);
+    } catch (error) {
+        console.error('ESP32 Local Proxy error:', error);
+        res.status(502).json({ 
+            error: 'ESP32 bağlantı hatası',
+            message: error.message,
+            deviceIp: deviceIp
+        });
+    }
+});
+
+// ESP32 Yerel Arayüz Ana Sayfa
+app.get('/device/:deviceId/local', async (req, res) => {
+    const deviceId = req.params.deviceId;
+    const device = devices.find(d => d.id === deviceId);
+    
+    if (!device) {
+        return res.status(404).send('Cihaz bulunamadı');
+    }
+    
+    const deviceState = deviceStates[deviceId] || {};
+    const deviceIp = deviceState.ipAddress;
+    
+    if (!deviceIp) {
+        return res.status(400).send('Cihaz IP adresi bilinmiyor');
+    }
+    
+    try {
+        await proxyESP32Local(deviceIp, req, res);
+    } catch (error) {
+        console.error('ESP32 Local error:', error);
+        
+        // Fallback HTML sayfası
+        res.send(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>${device.name} - ESP32 Yerel Arayüz</title>
+                <style>
+                    body { font-family: Arial; padding: 40px; text-align: center; background: #f5f5f5; }
+                    .container { max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }
+                    h1 { color: #333; }
+                    .error { background: #ffebee; color: #c62828; padding: 15px; border-radius: 8px; margin: 20px 0; }
+                    .btn { display: inline-block; padding: 10px 20px; background: #2196F3; color: white; text-decoration: none; border-radius: 5px; margin: 10px; }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h1>${device.name} - Yerel Arayüz</h1>
+                    <div class="error">
+                        <h3>❌ ESP32 Bağlantı Hatası</h3>
+                        <p>ESP32 cihazına bağlanılamadı.</p>
+                        <p><strong>Hata:</strong> ${error.message}</p>
+                        <p><strong>IP Adresi:</strong> ${deviceIp}</p>
+                    </div>
+                    <div>
+                        <a href="http://${deviceIp}" class="btn" target="_blank">Doğrudan Erişim</a>
+                        <a href="/dashboard" class="btn">Dashboard'a Dön</a>
+                    </div>
+                </div>
+            </body>
+            </html>
+        `);
+    }
+});
+
 // ESP32 Device Info Proxy
 app.get('/api/device/proxy-status/:deviceId', async (req, res) => {
     const deviceId = req.params.deviceId;
@@ -143,7 +393,11 @@ app.get('/api/device/proxy-status/:deviceId', async (req, res) => {
                 port: 80,
                 path: '/api/status',
                 method: 'GET',
-                timeout: 5000
+                timeout: 5000,
+                headers: {
+                    'User-Agent': 'ESP32-Dashboard/1.0',
+                    'Accept': 'application/json'
+                }
             };
             
             const proxyReq = http.request(options, (proxyRes) => {
@@ -237,145 +491,6 @@ app.get('/api/device/proxy-status/:deviceId', async (req, res) => {
     }
 });
 
-// Reverse Proxy için ESP32 HTML görüntüleme
-app.get('/device/:deviceId/html', async (req, res) => {
-    const deviceId = req.params.deviceId;
-    const device = devices.find(d => d.id === deviceId);
-    
-    if (!device) {
-        return res.status(404).send('Cihaz bulunamadı');
-    }
-    
-    const deviceState = deviceStates[deviceId] || {};
-    const deviceIp = deviceState.ipAddress;
-    
-    if (!deviceIp) {
-        return res.status(400).send('Cihaz IP adresi bilinmiyor');
-    }
-    
-    // Bu endpoint artık proxy yapmayacak, bilgi sayfası gösterecek
-    res.send(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>${device.name} - ESP32 Bilgisi</title>
-            <style>
-                body { font-family: Arial; padding: 20px; background: #f5f5f5; }
-                .container { max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }
-                h1 { color: #333; text-align: center; }
-                .info-card { background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 15px 0; }
-                .btn { display: inline-block; padding: 10px 20px; background: #2196F3; color: white; text-decoration: none; border-radius: 5px; margin: 5px; }
-            </style>
-            <script>
-                async function loadDeviceInfo() {
-                    try {
-                        const response = await fetch('/api/device/proxy-status/${deviceId}');
-                        const data = await response.json();
-                        
-                        let html = '<div class="info-card">';
-                        html += '<h3>📊 Cihaz Bilgileri</h3>';
-                        html += '<p><strong>Cihaz:</strong> ' + data.deviceName + '</p>';
-                        html += '<p><strong>ID:</strong> ' + data.deviceId + '</p>';
-                        html += '<p><strong>IP:</strong> ' + data.ipAddress + '</p>';
-                        html += '<p><strong>Durum:</strong> ' + (data.online ? '🟢 Çevrimiçi' : '🔴 Çevrimdışı') + '</p>';
-                        
-                        if (data.temperature) {
-                            html += '<p><strong>Sıcaklık:</strong> ' + data.temperature.toFixed(1) + '°C</p>';
-                        }
-                        
-                        if (data.ledState !== undefined) {
-                            html += '<p><strong>LED:</strong> ' + (data.ledState ? '🟢 Açık' : '🔴 Kapalı') + '</p>';
-                        }
-                        
-                        if (data.freeHeap) {
-                            html += '<p><strong>Boş RAM:</strong> ' + data.freeHeap + ' bytes</p>';
-                        }
-                        
-                        if (data.uptime) {
-                            const hours = Math.floor(data.uptime / 3600);
-                            const minutes = Math.floor((data.uptime % 3600) / 60);
-                            html += '<p><strong>Çalışma Süresi:</strong> ' + hours + ' saat ' + minutes + ' dakika</p>';
-                        }
-                        
-                        html += '</div>';
-                        
-                        html += '<div class="info-card">';
-                        html += '<h3>🔗 Hızlı Erişim</h3>';
-                        html += '<a href="http://${deviceIp}" class="btn" target="_blank">Yerel Arayüz</a>';
-                        html += '<a href="http://${deviceIp}/temperature" class="btn" target="_blank">🌡️ Sıcaklık</a>';
-                        html += '<a href="http://${deviceIp}/api/status" class="btn" target="_blank">📊 JSON API</a>';
-                        html += '<a href="/dashboard" class="btn">📋 Dashboard</a>';
-                        html += '</div>';
-                        
-                        document.getElementById('deviceInfo').innerHTML = html;
-                        
-                    } catch (error) {
-                        document.getElementById('deviceInfo').innerHTML = 
-                            '<div class="info-card" style="background:#ffebee; color:#c62828;">' +
-                            '<h3>❌ Bağlantı Hatası</h3>' +
-                            '<p>ESP32 cihazına bağlanılamadı.</p>' +
-                            '<p>Hata: ' + error.message + '</p>' +
-                            '<p>Yerel ağınızda ESP32\'nin IP adresine doğrudan erişebilirsiniz:</p>' +
-                            '<a href="http://${deviceIp}" class="btn" target="_blank">http://${deviceIp}</a>' +
-                            '</div>';
-                    }
-                }
-                
-                window.onload = loadDeviceInfo;
-            </script>
-        </head>
-        <body>
-            <div class="container">
-                <h1>${device.name}</h1>
-                <div id="deviceInfo">
-                    <div class="info-card" style="text-align: center;">
-                        <p>📡 Cihaz bilgileri yükleniyor...</p>
-                        <div style="font-size: 24px; color: #2196F3;">⏳</div>
-                    </div>
-                </div>
-            </div>
-        </body>
-        </html>
-    `);
-});
-
-// Reverse Proxy için genel endpoint
-app.all('/device/:deviceId/proxy/*', async (req, res) => {
-    const deviceId = req.params.deviceId;
-    const device = devices.find(d => d.id === deviceId);
-    
-    if (!device) {
-        return res.status(404).json({ error: 'Cihaz bulunamadı' });
-    }
-    
-    const deviceState = deviceStates[deviceId] || {};
-    const deviceIp = deviceState.ipAddress;
-    
-    if (!deviceIp) {
-        return res.status(400).json({ 
-            error: 'Cihaz IP adresi bilinmiyor',
-            deviceId: deviceId
-        });
-    }
-    
-    const proxyPath = req.params[0] || '';
-    const targetUrl = `http://${deviceIp}/${proxyPath}`;
-    
-    console.log(`🔗 Proxy: ${deviceId} -> ${targetUrl}`);
-    
-    try {
-        await proxyRequest(targetUrl, req, res);
-    } catch (error) {
-        console.error('Proxy error:', error);
-        res.status(502).json({ 
-            error: 'ESP32 bağlantı hatası',
-            message: error.message
-        });
-    }
-});
-
 // Cihaz detay sayfası
 app.get('/device/:deviceId', (req, res) => {
     const deviceId = req.params.deviceId;
@@ -411,7 +526,7 @@ app.get('/device/:deviceId', (req, res) => {
             <title>${device.name} - Cihaz Detayı</title>
             <style>
                 body { font-family: Arial; padding: 20px; background: #f5f5f5; }
-                .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }
+                .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }
                 h1 { color: #333; }
                 .status { padding: 5px 15px; border-radius: 20px; color: white; font-weight: bold; display: inline-block; }
                 .online { background: #4CAF50; }
@@ -419,9 +534,41 @@ app.get('/device/:deviceId', (req, res) => {
                 .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0; }
                 .info-card { background: #f8f9fa; padding: 15px; border-radius: 8px; }
                 .btn { padding: 10px 20px; background: #2196F3; color: white; text-decoration: none; border-radius: 5px; margin: 5px; display: inline-block; }
-                .iframe-container { width: 100%; height: 500px; border: 1px solid #ddd; border-radius: 8px; margin: 20px 0; }
+                .iframe-container { width: 100%; height: 700px; border: 1px solid #ddd; border-radius: 8px; margin: 20px 0; overflow: hidden; }
                 iframe { width: 100%; height: 100%; border: none; }
+                .tab-container { margin: 20px 0; }
+                .tab { overflow: hidden; border: 1px solid #ccc; background-color: #f1f1f1; border-radius: 8px 8px 0 0; }
+                .tab button { background-color: inherit; float: left; border: none; outline: none; cursor: pointer; padding: 14px 16px; transition: 0.3s; font-size: 16px; }
+                .tab button:hover { background-color: #ddd; }
+                .tab button.active { background-color: #fff; font-weight: bold; }
+                .tabcontent { display: none; padding: 20px; border: 1px solid #ccc; border-top: none; border-radius: 0 0 8px 8px; }
             </style>
+            <script>
+                function openTab(evt, tabName) {
+                    var i, tabcontent, tablinks;
+                    tabcontent = document.getElementsByClassName("tabcontent");
+                    for (i = 0; i < tabcontent.length; i++) {
+                        tabcontent[i].style.display = "none";
+                    }
+                    tablinks = document.getElementsByClassName("tablinks");
+                    for (i = 0; i < tablinks.length; i++) {
+                        tablinks[i].className = tablinks[i].className.replace(" active", "");
+                    }
+                    document.getElementById(tabName).style.display = "block";
+                    evt.currentTarget.className += " active";
+                    
+                    // İframe'i yenile
+                    if (tabName === 'localInterface') {
+                        document.getElementById('esp32Iframe').src = document.getElementById('esp32Iframe').src;
+                    }
+                }
+                
+                // Varsayılan olarak yerel arayüz sekmesini aç
+                document.addEventListener('DOMContentLoaded', function() {
+                    document.getElementById('localInterface').style.display = 'block';
+                    document.querySelector('.tablinks').className += ' active';
+                });
+            </script>
         </head>
         <body>
             <div class="container">
@@ -430,27 +577,71 @@ app.get('/device/:deviceId', (req, res) => {
                     ${isOnline ? '🟢 Çevrimiçi' : '🔴 Çevrimdışı'}
                 </span>
                 
-                <div class="info-grid">
-                    <div class="info-card">
-                        <h3>📊 Cihaz Bilgileri</h3>
-                        <p><strong>ID:</strong> ${device.id}</p>
-                        <p><strong>İsim:</strong> ${device.name}</p>
-                        <p><strong>Firmware:</strong> ${device.firmwareVersion || '1.0.0'}</p>
-                        <p><strong>IP:</strong> ${deviceState.ipAddress || 'Bilinmiyor'}</p>
+                <div class="tab-container">
+                    <div class="tab">
+                        <button class="tablinks" onclick="openTab(event, 'localInterface')">🏠 Yerel Arayüz</button>
+                        <button class="tablinks" onclick="openTab(event, 'deviceInfo')">📊 Cihaz Bilgileri</button>
+                        <button class="tablinks" onclick="openTab(event, 'otaControl')">⚡ OTA Kontrol</button>
                     </div>
                     
-                    <div class="info-card">
-                        <h3>🌐 Durum</h3>
-                        <p><strong>Son Görülme:</strong> ${new Date(device.lastSeen).toLocaleString()}</p>
-                        <p><strong>OTA:</strong> ${otaJob?.active ? 'Aktif' : 'Aktif Değil'}</p>
-                        <p><strong>Port:</strong> ${deviceState.port || 80}</p>
+                    <div id="localInterface" class="tabcontent">
+                        <h3>ESP32 Yerel Kontrol Paneli</h3>
+                        <div class="iframe-container">
+                            <iframe id="esp32Iframe" src="/device/${deviceId}/local" title="${device.name} Yerel Arayüz"></iframe>
+                        </div>
+                        <div style="margin-top: 10px;">
+                            <button onclick="document.getElementById('esp32Iframe').src = document.getElementById('esp32Iframe').src" 
+                                    class="btn" style="background:#4CAF50;">
+                                🔄 Yenile
+                            </button>
+                            <a href="/device/${deviceId}/local" target="_blank" class="btn">🔄 Yeni Sekmede Aç</a>
+                            <a href="http://${deviceState.ipAddress}" target="_blank" class="btn">🔗 Doğrudan Erişim</a>
+                        </div>
+                    </div>
+                    
+                    <div id="deviceInfo" class="tabcontent">
+                        <div class="info-grid">
+                            <div class="info-card">
+                                <h3>📊 Cihaz Bilgileri</h3>
+                                <p><strong>ID:</strong> ${device.id}</p>
+                                <p><strong>İsim:</strong> ${device.name}</p>
+                                <p><strong>Firmware:</strong> ${device.firmwareVersion || '1.0.0'}</p>
+                                <p><strong>IP:</strong> ${deviceState.ipAddress || 'Bilinmiyor'}</p>
+                                <p><strong>Port:</strong> ${deviceState.port || 80}</p>
+                            </div>
+                            
+                            <div class="info-card">
+                                <h3>🌐 Durum</h3>
+                                <p><strong>Son Görülme:</strong> ${new Date(device.lastSeen).toLocaleString()}</p>
+                                <p><strong>OTA:</strong> ${otaJob?.active ? 'Aktif' : 'Aktif Değil'}</p>
+                                <p><strong>Kayıt Tarihi:</strong> ${new Date(device.registeredAt || Date.now()).toLocaleString()}</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div id="otaControl" class="tabcontent">
+                        <h3>⚡ OTA Güncelleme</h3>
+                        <div class="info-card">
+                            <p><strong>OTA Durumu:</strong> ${otaJob?.active ? '🟡 Aktif' : '🟢 Hazır'}</p>
+                            ${otaJob?.active ? `
+                                <p><strong>Progress:</strong> ${otaJob.progress || 0}%</p>
+                                <p><strong>Başlangıç:</strong> ${new Date(otaJob.startedAt).toLocaleString()}</p>
+                            ` : ''}
+                            ${firmwareFile ? `
+                                <p><strong>Firmware:</strong> ${firmwareFile.name} (${Math.round(firmwareFile.size / 1024)} KB)</p>
+                            ` : '<p>Yüklenmiş firmware dosyası yok</p>'}
+                            
+                            <div style="margin-top: 20px;">
+                                <a href="/api/ota/status/${deviceId}" target="_blank" class="btn">📊 OTA Durumu</a>
+                                <a href="/dashboard" class="btn">📋 Dashboard OTA</a>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 
                 <div style="margin-top: 20px;">
-                    <a href="http://${deviceState.ipAddress}" class="btn" target="_blank">🔗 Yerel Arayüz</a>
-                    <a href="/device/${deviceId}/html" class="btn">📋 Dashboard Bilgisi</a>
                     <a href="/dashboard" class="btn">📊 Dashboard</a>
+                    <a href="/debug" class="btn" style="background:#FF9800;">🔧 Debug</a>
                 </div>
             </div>
         </body>
@@ -472,6 +663,8 @@ app.get('/debug', (req, res) => {
                 .card { background:white; padding:20px; border-radius:10px; margin:10px 0; }
                 pre { background:#f5f5f5; padding:10px; border-radius:5px; overflow:auto; }
                 .btn { padding:10px 15px; background:#2196F3; color:white; text-decoration:none; border-radius:5px; margin:5px; display:inline-block; }
+                .device-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 15px; }
+                .device-item { border: 1px solid #ddd; padding: 15px; border-radius: 8px; }
             </style>
         </head>
         <body>
@@ -489,27 +682,40 @@ app.get('/debug', (req, res) => {
                 <p>Çevrimiçi Cihaz: ${onlineCount}</p>
                 <p>OTA Jobs: ${Object.keys(otaJobs).length}</p>
                 <p>Firmware Dosyaları: ${Object.keys(firmwareFiles).length}</p>
+                <p>Aktif Proxyler: ${Object.keys(deviceStates).filter(id => deviceStates[id].ipAddress).length}</p>
             </div>
             
             <div class="card">
                 <h3>📋 Cihazlar</h3>
+                <div class="device-list">
                 ${devices.length > 0 ? devices.map(d => {
                     const state = deviceStates[d.id] || {};
+                    const isOnline = (Date.now() - d.lastSeen) < 30000;
                     return `
-                    <div style="margin:10px 0; padding:10px; border:1px solid #ddd; border-radius:5px;">
+                    <div class="device-item">
                         <strong>${d.name}</strong> (${d.id})<br>
-                        IP: ${state.ipAddress || 'Bilinmiyor'}<br>
-                        Port: ${state.port || 80}<br>
-                        <a href="/device/${d.id}" class="btn" style="background:#4CAF50; padding:5px 10px; font-size:12px;">Detay</a>
-                        <a href="/device/${d.id}/html" class="btn" style="background:#2196F3; padding:5px 10px; font-size:12px;" target="_blank">Bilgi</a>
-                        <a href="http://${state.ipAddress}" class="btn" style="background:#FF9800; padding:5px 10px; font-size:12px;" target="_blank">Yerel</a>
+                        <small>IP: ${state.ipAddress || 'Bilinmiyor'}:${state.port || 80}</small><br>
+                        <span style="color: ${isOnline ? '#4CAF50' : '#f44336'};">
+                            ${isOnline ? '🟢 Çevrimiçi' : '🔴 Çevrimdışı'}
+                        </span><br>
+                        <div style="margin-top: 10px;">
+                            <a href="/device/${d.id}" class="btn" style="background:#4CAF50; padding:5px 10px; font-size:12px;">Detay</a>
+                            <a href="/device/${d.id}/local" class="btn" style="background:#2196F3; padding:5px 10px; font-size:12px;">Yerel Arayüz</a>
+                            <a href="http://${state.ipAddress}" class="btn" style="background:#FF9800; padding:5px 10px; font-size:12px;" target="_blank">Doğrudan</a>
+                        </div>
                     </div>
                 `}).join('') : '<p>Henüz cihaz yok</p>'}
+                </div>
             </div>
             
             <div class="card">
                 <h3>⚡ OTA Jobs</h3>
                 <pre>${JSON.stringify(otaJobs, null, 2)}</pre>
+            </div>
+            
+            <div class="card">
+                <h3>🌐 Device States</h3>
+                <pre>${JSON.stringify(deviceStates, null, 2)}</pre>
             </div>
         </body>
         </html>
@@ -892,7 +1098,7 @@ app.use((req, res) => {
         path: req.path,
         method: req.method,
         timestamp: Date.now(),
-        suggestion: 'Geçerli endpointler: /, /dashboard, /debug, /api/*'
+        suggestion: 'Geçerli endpointler: /, /dashboard, /debug, /api/*, /device/:id/*'
     });
 });
 
@@ -908,7 +1114,7 @@ app.listen(PORT, () => {
 📊 Dashboard: http://localhost:${PORT}/dashboard
 🔧 Debug: http://localhost:${PORT}/debug
 📡 API: http://localhost:${PORT}/api/devices
-🔗 Device Info: http://localhost:${PORT}/device/:id/html
+🏠 ESP32 Yerel Arayüz: http://localhost:${PORT}/device/:id/local
 ⚡ OTA: http://localhost:${PORT}/api/ota
 ❤️  Health: http://localhost:${PORT}/health
 ========================================
