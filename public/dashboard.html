@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>ESP32 Dashboard - Çevrimiçi Cihazlar</title>
+    <title>ESP32 Dashboard - Render.com</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: Arial, sans-serif; background: #f5f5f5; min-height: 100vh; }
@@ -43,6 +43,22 @@
         .stat-num { font-size: 28px; font-weight: bold; }
         .stat-label { font-size: 12px; opacity: 0.9; }
         
+        .render-info {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            text-align: center;
+        }
+        
+        .warning {
+            background: #fff3cd;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            border-left: 4px solid #ffc107;
+        }
+        
         .devices-container { 
             background: white; 
             padding: 20px; 
@@ -64,6 +80,7 @@
             border-left: 4px solid #4CAF50;
         }
         
+        .device-card.no-ip { border-left-color: #ff9800; }
         .device-card.ota-active { border-left-color: #FF9800; }
         
         .device-header { 
@@ -100,6 +117,17 @@
         }
         
         .status.ota { background: #FF9800; }
+        .status.no-ip { background: #ff9800; }
+        
+        .ip-warning {
+            font-size: 11px;
+            color: #f57c00;
+            background: #fff3e0;
+            padding: 3px 8px;
+            border-radius: 3px;
+            margin: 5px 0;
+            display: inline-block;
+        }
         
         .ota-progress {
             margin: 8px 0;
@@ -138,6 +166,7 @@
         .btn-html { background: #2196F3; }
         .btn-ota { background: #FF9800; }
         .btn-details { background: #4CAF50; }
+        .btn-setup { background: #9C27B0; }
         
         .btn:hover { opacity: 0.9; }
         
@@ -373,8 +402,16 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>📱 ESP32 Dashboard</h1>
+            <h1>📱 ESP32 Dashboard - Render.com</h1>
             <p>Sadece çevrimiçi cihazlar gösteriliyor</p>
+            
+            <div class="render-info">
+                <p><strong>🌐 Render.com Deployment</strong></p>
+                <p>ESP32'lerin PUBLIC IP adresine ihtiyacı var!</p>
+                <a href="/setup" class="btn btn-setup" style="margin-top: 10px; display: inline-block;">
+                    <i class="fas fa-rocket"></i> Kurulum Rehberi
+                </a>
+            </div>
             
             <div class="stats">
                 <div class="stat" onclick="loadDevices()">
@@ -389,17 +426,24 @@
                     <div class="stat-num"><i class="fas fa-bug"></i></div>
                     <div class="stat-label">DEBUG</div>
                 </div>
+                <div class="stat" onclick="window.open('/setup', '_blank')">
+                    <div class="stat-num"><i class="fas fa-rocket"></i></div>
+                    <div class="stat-label">KURULUM</div>
+                </div>
             </div>
             
             <div style="margin-top: 10px;">
-                <button onclick="loadDevices()" style="padding: 8px 16px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                <button onclick="loadDevices()" class="btn" style="background:#4CAF50;">
                     <i class="fas fa-sync-alt"></i> Yenile
                 </button>
-                <button onclick="window.open('/debug', '_blank')" style="padding: 8px 16px; background: #FF9800; color: white; border: none; border-radius: 4px; cursor: pointer; margin-left: 8px;">
+                <button onclick="window.open('/debug', '_blank')" class="btn" style="background:#FF9800;">
                     <i class="fas fa-bug"></i> Debug
                 </button>
-                <button onclick="window.open('/', '_blank')" style="padding: 8px 16px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer; margin-left: 8px;">
+                <button onclick="window.open('/', '_blank')" class="btn" style="background:#2196F3;">
                     <i class="fas fa-home"></i> Ana Sayfa
+                </button>
+                <button onclick="window.open('/setup', '_blank')" class="btn" style="background:#9C27B0;">
+                    <i class="fas fa-rocket"></i> Kurulum Rehberi
                 </button>
             </div>
         </div>
@@ -407,6 +451,9 @@
         <div class="devices-container">
             <h2 style="color: #333; margin-bottom: 15px;">
                 <i class="fas fa-microchip"></i> Çevrimiçi Cihazlar
+                <span style="font-size: 12px; color: #666; margin-left: 10px;">
+                    (Public IP gereklidir)
+                </span>
             </h2>
             
             <div id="devices">
@@ -467,12 +514,16 @@
     <div id="otaModal" class="ota-modal">
         <div class="ota-modal-content">
             <div class="ota-modal-title">
-                <i class="fas fa-upload"></i> OTA Güncelleme
+                <i class="fas fa-upload"></i> OTA Güncelleme - Render.com
             </div>
             
             <div id="otaDeviceInfo" style="text-align: center; margin-bottom: 15px;">
                 <strong id="otaDeviceName">Cihaz Adı</strong><br>
                 <small id="otaDeviceId">Cihaz ID</small>
+            </div>
+            
+            <div class="warning" style="margin: 10px 0; padding: 10px;">
+                <i class="fas fa-info-circle"></i> ESP32'nin internet bağlantısı ve public IP'si olmalıdır
             </div>
             
             <div class="ota-form" id="otaForm">
@@ -508,10 +559,11 @@
         let devices = [];
         let selectedDeviceForOTA = null;
         let selectedDeviceForLocal = null;
+        let renderUrl = window.location.origin;
         
         // Sayfa yüklendiğinde çalıştır
         document.addEventListener('DOMContentLoaded', function() {
-            console.log('Dashboard yüklendi');
+            console.log('Dashboard yüklendi - Render.com');
             loadDevices();
             
             // Her 10 saniyede bir otomatik yenile
@@ -569,7 +621,7 @@
         function updateStats() {
             document.getElementById('online-count').textContent = devices.length;
             checkOTAJobs();
-            document.title = `(${devices.length}) ESP32 Dashboard`;
+            document.title = `(${devices.length}) ESP32 Dashboard - Render.com`;
         }
         
         // Cihazları göster
@@ -582,6 +634,12 @@
                         <i class="fas fa-wifi-slash"></i>
                         <h3>Çevrimiçi Cihaz Yok</h3>
                         <p>ESP32 cihazlarınızın bağlanmasını bekleyin...</p>
+                        <div class="warning" style="max-width: 400px; margin: 20px auto;">
+                            <p><strong>⚠️ Önemli:</strong> ESP32'lerin PUBLIC IP adresine ihtiyacı var!</p>
+                            <a href="/setup" class="btn btn-setup" style="margin-top: 10px; display: inline-block;">
+                                <i class="fas fa-rocket"></i> Kurulum Rehberi
+                            </a>
+                        </div>
                         <button onclick="loadDevices()" style="margin-top: 15px; padding: 8px 16px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer;">
                             <i class="fas fa-sync-alt"></i> Yeniden Dene
                         </button>
@@ -597,22 +655,29 @@
                 const isOTAActive = device.otaActive || false;
                 const otaProgress = device.otaProgress || 0;
                 const hasFirmware = device.hasFirmware || false;
-                const ipAddress = device.ipAddress || 'IP Yok';
+                const ipAddress = device.ipAddress || null;
+                const hasPublicIp = ipAddress && ipAddress !== 'IP Yok' && ipAddress !== 'Bilinmiyor';
                 
                 html += `
-                    <div class="device-card ${isOTAActive ? 'ota-active' : ''}">
+                    <div class="device-card ${!hasPublicIp ? 'no-ip' : ''} ${isOTAActive ? 'ota-active' : ''}">
                         <div class="device-header">
                             <div class="device-name">${device.name}</div>
-                            <div class="status ${isOTAActive ? 'ota' : ''}">
-                                ${isOTAActive ? '⚡ OTA' : '🟢 ÇEVRİMİÇİ'}
+                            <div class="status ${isOTAActive ? 'ota' : (!hasPublicIp ? 'no-ip' : '')}">
+                                ${isOTAActive ? '⚡ OTA' : (!hasPublicIp ? '🌐 IP Gerekli' : '🟢 ÇEVRİMİÇİ')}
                             </div>
                         </div>
                         
                         <div class="device-id">${device.id}</div>
                         
-                        <div style="font-size: 11px; color: #666; margin: 5px 0;">
-                            <i class="fas fa-network-wired"></i> ${ipAddress}
-                        </div>
+                        ${hasPublicIp ? `
+                            <div style="font-size: 11px; color: #4CAF50; margin: 5px 0;">
+                                <i class="fas fa-network-wired"></i> ${ipAddress}
+                            </div>
+                        ` : `
+                            <div class="ip-warning">
+                                <i class="fas fa-exclamation-triangle"></i> Public IP gerekiyor
+                            </div>
+                        `}
                         
                         ${hasFirmware ? `<div style="font-size: 11px; color: #4CAF50; margin: 3px 0;">
                             <i class="fas fa-check-circle"></i> Firmware hazır
@@ -632,8 +697,8 @@
                         </div>
                         
                         <div class="actions">
-                            <button class="btn btn-html" onclick="showLocalInterface('${device.id}', '${device.name}', '${ipAddress}')">
-                                <i class="fas fa-home"></i> YEREL ARAYÜZ
+                            <button class="btn btn-html" onclick="showLocalInterface('${device.id}', '${device.name}', '${ipAddress}')" ${!hasPublicIp ? 'disabled' : ''}>
+                                ${hasPublicIp ? '<i class="fas fa-home"></i> YEREL ARAYÜZ' : '<i class="fas fa-ban"></i> IP GEREKLİ'}
                             </button>
                             <button class="btn btn-ota" onclick="openOTAModal('${device.id}', '${device.name}')" ${isOTAActive ? 'disabled' : ''}>
                                 ${isOTAActive ? '<i class="fas fa-sync-alt fa-spin"></i> OTA' : '<i class="fas fa-upload"></i> OTA'}
@@ -649,6 +714,12 @@
         
         // ESP32 Yerel Arayüzünü göster
         function showLocalInterface(deviceId, deviceName, ipAddress) {
+            if (!ipAddress || ipAddress === 'IP Yok' || ipAddress === 'Bilinmiyor') {
+                alert('Bu cihazın yerel arayüzüne erişmek için public IP adresi gerekiyor!\n\nLütfen Kurulum Rehberini inceleyin: /setup');
+                window.open('/setup', '_blank');
+                return;
+            }
+            
             selectedDeviceForLocal = { id: deviceId, name: deviceName, ip: ipAddress };
             
             // Modal başlığını ayarla
@@ -695,7 +766,7 @@
             document.getElementById('deviceInfoModal').style.display = 'block';
             
             try {
-                const response = await fetch(`/api/device/proxy-status/${deviceId}`);
+                const response = await fetch(`/api/device/status/${deviceId}`);
                 const data = await response.json();
                 
                 let html = '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">';
@@ -703,38 +774,39 @@
                 html += `
                     <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
                         <h3 style="margin-top: 0; color: #333; border-bottom: 2px solid #2196F3; padding-bottom: 5px;">📊 Cihaz Bilgileri</h3>
-                        <p><strong>Cihaz:</strong> ${data.deviceName || deviceName}</p>
-                        <p><strong>ID:</strong> ${data.deviceId || deviceId}</p>
-                        <p><strong>IP:</strong> ${data.ipAddress || ipAddress}</p>
+                        <p><strong>Cihaz:</strong> ${data.device.name || deviceName}</p>
+                        <p><strong>ID:</strong> ${data.device.id || deviceId}</p>
+                        <p><strong>IP:</strong> ${data.deviceState.ipAddress || ipAddress || 'Public IP Gerekli'}</p>
                         <p><strong>Durum:</strong> ${data.online ? '🟢 Çevrimiçi' : '🔴 Çevrimdışı'}</p>
-                        <p><strong>Versiyon:</strong> ${data.firmwareVersion || '1.0.0'}</p>
+                        <p><strong>Versiyon:</strong> ${data.device.firmwareVersion || '1.0.0'}</p>
+                        <p><strong>Render URL:</strong> ${data.renderUrl || renderUrl}</p>
                     </div>
                     
                     <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
                         <h3 style="margin-top: 0; color: #333; border-bottom: 2px solid #4CAF50; padding-bottom: 5px;">🌡️ Sistem Durumu</h3>
                 `;
                 
-                if (data.temperature !== undefined) {
-                    html += `<p><strong>Sıcaklık:</strong> <span style="font-size: 24px; color: #e74c3c; font-weight: bold;">${data.temperature.toFixed(1)}°C</span></p>`;
+                if (data.device.temperature !== undefined) {
+                    html += `<p><strong>Sıcaklık:</strong> <span style="font-size: 24px; color: #e74c3c; font-weight: bold;">${data.device.temperature.toFixed(1)}°C</span></p>`;
                 }
                 
-                if (data.ledState !== undefined) {
-                    html += `<p><strong>LED:</strong> ${data.ledState ? '🟢 Açık' : '🔴 Kapalı'}</p>`;
+                if (data.device.ledState !== undefined) {
+                    html += `<p><strong>LED:</strong> ${data.device.ledState ? '🟢 Açık' : '🔴 Kapalı'}</p>`;
                 }
                 
-                if (data.freeHeap !== undefined) {
-                    html += `<p><strong>Boş RAM:</strong> ${Math.round(data.freeHeap / 1024)} KB</p>`;
+                if (data.device.freeHeap !== undefined) {
+                    html += `<p><strong>Boş RAM:</strong> ${Math.round(data.device.freeHeap / 1024)} KB</p>`;
                 }
                 
-                if (data.uptime !== undefined) {
-                    const hours = Math.floor(data.uptime / 3600);
-                    const minutes = Math.floor((data.uptime % 3600) / 60);
-                    const seconds = data.uptime % 60;
+                if (data.device.uptime !== undefined) {
+                    const hours = Math.floor(data.device.uptime / 3600);
+                    const minutes = Math.floor((data.device.uptime % 3600) / 60);
+                    const seconds = data.device.uptime % 60;
                     html += `<p><strong>Çalışma Süresi:</strong> ${hours}h ${minutes}m ${seconds}s</p>`;
                 }
                 
-                if (data.rssi !== undefined) {
-                    html += `<p><strong>WiFi Sinyali:</strong> ${data.rssi} dBm</p>`;
+                if (data.device.rssi !== undefined) {
+                    html += `<p><strong>WiFi Sinyali:</strong> ${data.device.rssi} dBm</p>`;
                 }
                 
                 html += '</div></div>';
@@ -743,22 +815,18 @@
                     <div style="margin-top: 20px; background: #f8f9fa; padding: 15px; border-radius: 8px;">
                         <h3 style="margin-top: 0; color: #333; border-bottom: 2px solid #FF9800; padding-bottom: 5px;">🔗 Hızlı Erişim</h3>
                         <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                            <button onclick="showLocalInterface('${deviceId}', '${deviceName}', '${ipAddress}')" class="btn btn-html" style="margin: 5px;">
-                                <i class="fas fa-home"></i> Yerel Arayüz
-                            </button>
-                            <button onclick="window.open('http://${data.ipAddress || ipAddress}', '_blank')" 
-                                    ${!data.ipAddress && ipAddress === 'IP Yok' ? 'disabled' : ''}
+                            <button onclick="showLocalInterface('${deviceId}', '${deviceName}', '${data.deviceState.ipAddress || ipAddress}')" 
+                                    ${!data.deviceState.ipAddress ? 'disabled' : ''}
                                     class="btn btn-html" style="margin: 5px;">
-                                <i class="fas fa-external-link-alt"></i> Doğrudan Erişim
-                            </button>
-                            <button onclick="window.open('http://${data.ipAddress || ipAddress}/temperature', '_blank')" 
-                                    ${!data.ipAddress && ipAddress === 'IP Yok' ? 'disabled' : ''}
-                                    class="btn btn-html" style="margin: 5px;">
-                                🌡️ Sıcaklık
+                                ${data.deviceState.ipAddress ? '<i class="fas fa-home"></i> Yerel Arayüz' : '<i class="fas fa-ban"></i> IP Gerekli'}
                             </button>
                             <button onclick="window.open('/device/${deviceId}', '_blank')" 
                                     class="btn btn-html" style="margin: 5px;">
                                 📋 Detaylı Sayfa
+                            </button>
+                            <button onclick="window.open('/setup', '_blank')" 
+                                    class="btn btn-setup" style="margin: 5px;">
+                                🚀 Kurulum Rehberi
                             </button>
                         </div>
                     </div>
@@ -772,10 +840,10 @@
                         <h3>❌ Bağlantı Hatası</h3>
                         <p>ESP32 cihazına bağlanılamadı.</p>
                         <p><strong>Hata:</strong> ${error.message}</p>
-                        <p><strong>IP Adresi:</strong> ${ipAddress}</p>
+                        <p><strong>IP Adresi:</strong> ${ipAddress || 'Public IP gerekli'}</p>
                         <div style="margin-top: 20px;">
-                            <a href="http://${ipAddress}" target="_blank" class="btn btn-html" style="display: inline-block; margin: 5px;">
-                                Doğrudan Erişim
+                            <a href="/setup" class="btn btn-setup" style="display: inline-block; margin: 5px;">
+                                🚀 Kurulum Rehberi
                             </a>
                             <button onclick="closeDeviceInfoModal()" class="btn btn-html" style="background: #757575; display: inline-block; margin: 5px;">
                                 Kapat
@@ -814,7 +882,7 @@
         
         // Tüm cihazlar için OTA
         function openOTAAll() {
-            alert('Tüm cihazlar için OTA özelliği yakında eklenecek!');
+            alert('Tüm cihazlar için OTA özelliği yakında eklenecek!\n\nNot: Tüm cihazların public IP adresi olmalıdır.');
         }
         
         // OTA modal kapat
