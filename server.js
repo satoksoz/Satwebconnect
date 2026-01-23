@@ -814,55 +814,106 @@ app.get('/api/devices', (req, res) => {
     res.json(onlineDevices);
 });
 
-// API: Cihaz kaydı (Render.com için güncellendi)
+// API: Cihaz kaydı (DÜZELTİLDİ - ESP32'den gelen tüm alanları kabul et)
 app.post('/api/register', (req, res) => {
-    const { deviceId, deviceName = 'ESP32', firmwareVersion = '1.0.0', 
-            ipAddress = null, port = 80, gatewayIp = null } = req.body;
-    
-    if (!deviceId) {
-        return res.status(400).json({ error: 'Device ID gerekli' });
-    }
-    
-    let device = devices.find(d => d.id === deviceId);
-    
-    if (device) {
-        // Güncelle
-        device.lastSeen = Date.now();
-        device.name = deviceName || device.name;
-        device.firmwareVersion = firmwareVersion || device.firmwareVersion;
-    } else {
-        // Yeni cihaz
-        device = {
-            id: deviceId,
-            name: deviceName,
-            lastSeen: Date.now(),
-            online: true,
-            firmwareVersion: firmwareVersion,
-            registeredAt: Date.now(),
-            renderRegistered: true
+    try {
+        console.log('📥 Register request received:', JSON.stringify(req.body));
+        
+        const { 
+            deviceId, 
+            deviceName, 
+            firmwareVersion, 
+            ipAddress, 
+            port, 
+            gatewayIp,
+            temperature,
+            ledState,
+            rssi,
+            otaInProgress
+        } = req.body;
+        
+        console.log('📋 Parsed parameters:', {
+            deviceId, 
+            deviceName, 
+            firmwareVersion, 
+            ipAddress, 
+            port, 
+            gatewayIp,
+            temperature,
+            ledState,
+            rssi,
+            otaInProgress
+        });
+        
+        if (!deviceId) {
+            console.log('❌ Validation error: Device ID is required');
+            return res.status(400).json({ 
+                error: 'Device ID gerekli',
+                receivedBody: req.body
+            });
+        }
+        
+        let device = devices.find(d => d.id === deviceId);
+        
+        if (device) {
+            // Güncelle
+            console.log(`🔄 Updating existing device: ${deviceId}`);
+            device.lastSeen = Date.now();
+            device.name = deviceName || device.name;
+            device.firmwareVersion = firmwareVersion || device.firmwareVersion;
+            device.temperature = temperature !== undefined ? temperature : device.temperature;
+            device.ledState = ledState !== undefined ? ledState : device.ledState;
+            device.rssi = rssi !== undefined ? rssi : device.rssi;
+        } else {
+            // Yeni cihaz
+            console.log(`🆕 Creating new device: ${deviceId}`);
+            device = {
+                id: deviceId,
+                name: deviceName || `ESP32_${deviceId.substring(0, 8)}`,
+                lastSeen: Date.now(),
+                online: true,
+                firmwareVersion: firmwareVersion || '1.0.0',
+                registeredAt: Date.now(),
+                renderRegistered: true,
+                temperature: temperature !== undefined ? temperature : 25.0,
+                ledState: ledState !== undefined ? ledState : false,
+                rssi: rssi !== undefined ? rssi : -100
+            };
+            devices.push(device);
+        }
+        
+        // Cihaz durumunu güncelle
+        deviceStates[deviceId] = {
+            ipAddress: ipAddress || null,
+            port: port || 80,
+            gatewayIp: gatewayIp || null,
+            lastUpdate: Date.now(),
+            renderUrl: req.get('host'),
+            temperature: temperature !== undefined ? temperature : null,
+            ledState: ledState !== undefined ? ledState : null,
+            rssi: rssi !== undefined ? rssi : null,
+            otaInProgress: otaInProgress !== undefined ? otaInProgress : false
         };
-        devices.push(device);
+        
+        console.log(`✅ Cihaz kaydedildi [Render]: ${deviceId} - ${device.name} - IP: ${ipAddress || 'No IP'}:${port || 80}`);
+        
+        res.json({ 
+            success: true, 
+            device: device,
+            deviceState: deviceStates[deviceId],
+            totalDevices: devices.length,
+            renderUrl: req.get('host'),
+            message: ipAddress ? 'Cihaz başarıyla kaydedildi' : 'Cihaz kaydedildi ama public IP gerekli'
+        });
+        
+    } catch (error) {
+        console.error('❌ Register error:', error);
+        res.status(500).json({ 
+            error: 'Sunucu hatası',
+            message: error.message,
+            stack: error.stack
+        });
     }
-    
-    // Cihaz durumunu güncelle
-    deviceStates[deviceId] = {
-        ipAddress: ipAddress,
-        port: port,
-        gatewayIp: gatewayIp,
-        lastUpdate: Date.now(),
-        renderUrl: req.get('host')
-    };
-    
-    console.log(`✅ Cihaz kaydedildi [Render]: ${deviceId} - ${device.name} - IP: ${ipAddress}:${port}`);
-    
-    res.json({ 
-        success: true, 
-        device: device,
-        deviceState: deviceStates[deviceId],
-        totalDevices: devices.length,
-        renderUrl: req.get('host'),
-        message: ipAddress ? 'Cihaz başarıyla kaydedildi' : 'Cihaz kaydedildi ama public IP gerekli'
-    });
 });
 
 // API: OTA için dosya yükleme
